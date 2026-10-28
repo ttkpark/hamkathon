@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>자비스 현황판</title>
+<style>
+  body { margin:0; padding:20px; background:#070b12; color:#d7f3ff; font-family:system-ui,sans-serif; }
+  h1 { font-size:18px; letter-spacing:.2em; color:#35d9ff; }
+  input, button { background:#0d1622; color:#d7f3ff; border:1px solid #1f3346; border-radius:8px; padding:8px 10px; font:inherit; }
+  table { width:100%; border-collapse:collapse; margin-top:16px; font-size:14px; }
+  th, td { text-align:left; padding:8px; border-bottom:1px solid #1a2a3a; vertical-align:top; }
+  td.p { white-space:pre-wrap; max-width:500px; color:#9fc3d4; }
+  td.l { color:#5d7a8a; }
+  button.x { color:#ff8a8a; padding:2px 8px; }
+</style>
+</head>
+<body>
+<h1>J.A.R.V.I.S. 현황판</h1>
+<form id="f"><input id="pw" type="password" placeholder="관리자 비밀번호"> <button>열기</button> <span id="err"></span></form>
+<table id="t" hidden><thead><tr><th>참가자</th><th>자비스</th><th>설계도</th><th>대화</th><th>관찰</th><th>마지막 말</th><th></th></tr></thead><tbody></tbody></table>
+<script>
+const $ = id => document.getElementById(id);
+async function refresh(){
+  const r = await fetch('/api/admin'); if(!r.ok) return false;
+  const rows = await r.json(); $('t').hidden=false;
+  $('t').tBodies[0].innerHTML = rows.map(u=>`<tr><td>${u.id}</td><td>${u.name}</td><td class="p"></td><td>${u.turns}</td><td>${u.watches}</td><td class="l"></td><td><button class="x" data-id="${u.id}">삭제</button></td></tr>`).join('');
+  [...$('t').tBodies[0].rows].forEach((tr,i)=>{ tr.cells[2].textContent=rows[i].persona; tr.cells[5].textContent=rows[i].last.slice(0,80); });
+  return true;
+}
+$('f').onsubmit = async e => { e.preventDefault();
+  const r = await fetch('/api/admin/login',{ method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ pw:$('pw').value }) });
+  if(!r.ok) return $('err').textContent='비밀번호가 달라요'; $('f').hidden=true; refresh(); };
+$('t').onclick = async e => { const id=e.target.dataset.id; if(!id) return; // ponytail: confirm() 없음, 삭제는 바로. 실수 걱정되면 2클릭으로.
+  await fetch('/api/admin?id='+encodeURIComponent(id),{ method:'DELETE' }); refresh(); };
+refresh().then(ok => { if(ok) $('f').hidden=true; });
+setInterval(()=>{ if($('f').hidden) refresh(); }, 5000);
+</script>
+</body>
+</html>

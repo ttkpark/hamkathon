@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>나만의 자비스</title>
+<style>
+  :root { --bg:#070b12; --fg:#d7f3ff; --cyan:#35d9ff; --dim:#5d7a8a; --panel:#0d1622; --line:#1f3346; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font-family:system-ui,-apple-system,"Segoe UI",sans-serif; min-height:100vh; display:grid; grid-template-columns:1fr 380px; grid-template-rows:auto 1fr; }
+  @media (max-width:900px){ body { grid-template-columns:1fr; } }
+  header { grid-column:1/-1; padding:12px 16px; display:flex; gap:12px; align-items:center; border-bottom:1px solid #1a2a3a; flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0; letter-spacing:.2em; color:var(--cyan); font-weight:600; }
+  input, textarea, button, select { background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:8px 10px; font:inherit; }
+  button { cursor:pointer; } button.on { border-color:var(--cyan); color:var(--cyan); }
+  #name { width:130px; }
+  #persona { flex:1; height:38px; resize:vertical; min-width:200px; }
+  #saved { font-size:12px; color:var(--dim); width:60px; }
+  #stage { position:relative; padding:16px; display:flex; flex-direction:column; gap:12px; }
+  #camwrap { position:relative; }
+  #cam { width:100%; aspect-ratio:4/3; background:#000; border-radius:12px; object-fit:cover; border:1px solid var(--line); transform:scaleX(-1); display:block; }
+  #hud { position:absolute; left:12px; top:12px; padding:6px 12px; border-radius:8px; background:rgba(7,11,18,.7); color:var(--cyan); font-size:15px; letter-spacing:.05em; border:1px solid rgba(53,217,255,.4); display:none; }
+  .alert #hud { color:#ff8a8a; border-color:#ff8a8a; }
+  #ring { position:absolute; inset:16px; pointer-events:none; border-radius:12px; box-shadow:inset 0 0 0 2px transparent; transition:box-shadow .3s; }
+  .listening #ring { box-shadow:inset 0 0 0 2px var(--cyan), inset 0 0 40px rgba(53,217,255,.25); }
+  .thinking #ring { box-shadow:inset 0 0 0 2px #ffb545; animation:pulse 1s infinite alternate; }
+  .speaking #ring { box-shadow:inset 0 0 0 3px #7dff9a; }
+  .alert #ring { box-shadow:inset 0 0 0 3px #ff5a5a, inset 0 0 60px rgba(255,90,90,.3); }
+  @keyframes pulse { to { box-shadow:inset 0 0 0 2px #ffb545, inset 0 0 60px rgba(255,181,69,.3); } }
+  #status { font-size:13px; color:var(--dim); min-height:1.2em; }
+  #sub { font-size:22px; line-height:1.4; min-height:2.8em; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  #ask { flex:1; min-width:160px; }
+  aside { border-left:1px solid #1a2a3a; padding:12px; overflow:auto; font-size:14px; }
+  aside p { margin:0 0 10px; padding:8px 10px; border-radius:8px; background:var(--panel); white-space:pre-wrap; }
+  aside p.me { background:#13263a; margin-left:30px; }
+  aside p.watch { border-left:3px solid var(--cyan); }
+  aside p.err { color:#ff8a8a; }
+  small { color:var(--dim); }
+  #login { position:fixed; inset:0; background:rgba(7,11,18,.96); display:flex; align-items:center; justify-content:center; z-index:9; }
+  #login form { display:flex; flex-direction:column; gap:10px; width:300px; }
+  #login h2 { margin:0 0 6px; color:var(--cyan); letter-spacing:.15em; }
+  #login .err { color:#ff8a8a; font-size:13px; min-height:1em; }
+</style>
+</head>
+<body>
+<div id="login"><form>
+  <h2>J.A.R.V.I.S.</h2>
+  <small>아이디로 들어와서 내 컴퓨터 카메라로 나만의 자비스 앱을 만들어요. 처음 쓰는 아이디는 자동으로 생깁니다.</small>
+  <input id="lid" placeholder="아이디" autocomplete="username" required>
+  <input id="lpw" type="password" placeholder="비밀번호" autocomplete="current-password" required>
+  <button>입장</button>
+  <div class="err" id="lerr"></div>
+</form></div>
+
+<header>
+  <h1>J.A.R.V.I.S.</h1>
+  <input id="name" placeholder="이름 (호출어)" title="부르는 이름 = 호출어">
+  <textarea id="persona" placeholder="설계도: 이 앱이 카메라로 무엇을 보고, 언제 무슨 말을 할지 적으세요. 오른쪽 예시를 골라 시작해도 됩니다."></textarea>
+  <select id="examples" title="예시 설계도"><option value="">예시 설계도…</option></select>
+  <span id="saved"></span>
+  <button id="reset" title="대화 기억 지우기">기억 초기화</button>
+  <small id="whoami"></small>
+</header>
+<section id="stage">
+  <div id="camwrap"><video id="cam" autoplay playsinline muted></video><div id="hud"></div></div>
+  <div id="ring"></div>
+  <div id="status">카메라 켜는 중…</div>
+  <div id="sub"></div>
+  <div class="row">
+    <button id="mic">🎙 듣기 켜기</button>
+    <button id="watch">👁 자동 관찰</button>
+    <select id="every"><option value="5">5초마다</option><option value="10" selected>10초마다</option><option value="30">30초마다</option></select>
+    <button id="look">👀 지금 뭐 보여?</button>
+    <input id="ask" placeholder="또는 여기에 적고 Enter">
+    <select id="camsel" title="카메라 선택"></select>
+  </div>
+  <small>🎙 듣기: "<b id="wake">자비스</b>, …" 라고 부르면 그 순간의 장면과 함께 전달. 👁 자동 관찰: 부르지 않아도 주기적으로 장면을 보고 설계도대로 판단해 상태(HUD)를 띄우고 필요할 때만 말합니다.</small>
+</section>
+<aside id="log"></aside>
+<canvas id="cv" hidden></canvas>
+
+<script>
+const $ = id => document.getElementById(id);
+const cam=$('cam'), cv=$('cv'), log=$('log'), status=$('status'), sub=$('sub'), hud=$('hud');
+const NAME = () => ($('name').value.trim() || '자비스');
+const api = async (path, method='GET', data) => {
+  const r = await fetch(path, { method, headers:{'content-type':'application/json'}, body:data?JSON.stringify(data):undefined });
+  const j = await r.json(); if(!r.ok) throw new Error(j.error||r.status); return j;
+};
+const say = (cls, text) => { const p=document.createElement('p'); p.className=cls; p.textContent=text; log.prepend(p); };
+const setState = (s, msg) => { document.body.className = s + (alerting?' alert':''); if(msg!=null) status.textContent = msg; };
+let alerting=false;
+
+// ---- 예시 설계도 (해커톤 출발점) ----
+const EXAMPLES = {
+  '졸음 감시관': '나는 공부·운전 중 졸음을 감시하는 앱이다. 눈 감김, 고개 떨굼, 하품을 보고 졸음 정도를 0~100%로 판단한다. HUD에는 "졸음 NN%"와 근거 한 단어. 60%가 넘으면 단호하게 깨우는 말을 하고, 그 아래면 조용히 있는다. 말투는 군대 조교.',
+  '자세 코치': '나는 책상 앞 자세 교정 코치다. 거북목, 구부정한 등, 턱 괴기, 화면과의 거리를 본다. HUD에는 "자세 좋음/보통/나쁨 · 이유". 나쁜 자세가 2번 연속 관찰되면 부드럽게 한 번 지적하고, 좋아지면 칭찬 한 마디. 말투는 다정한 필라테스 선생님.',
+  '냉장고 셰프': '나는 요리 도우미다. 카메라에 보이는 식재료를 알아보고 HUD에 재료 목록을 띄운다. 재료가 새로 보이면 그 재료로 만들 수 있는 요리 하나를 짧게 제안한다. 사용자가 부르면 레시피를 단계별로 알려준다. 말투는 유쾌한 이탈리아 셰프.',
+  '표정 DJ': '나는 사용자의 표정과 분위기를 읽는 DJ다. HUD에는 "기분: 즐거움/지침/집중/우울" 같은 한 단어와 확신도. 기분이 바뀐 순간에만 어울리는 노래 한 곡을 추천하며 한마디 한다. 말투는 심야 라디오 DJ.',
+  '책상 정리 잔소리꾼': '나는 책상 상태를 감시하는 잔소리꾼이다. 컵, 쓰레기, 흩어진 물건, 케이블 상태를 보고 HUD에 "정리도 N/10". 5 이하가 되면 츤데레처럼 잔소리하고, 치워지면 마지못해 칭찬한다.',
+};
+for(const k in EXAMPLES) $('examples').add(new Option(k, k));
+$('examples').onchange = () => { const k=$('examples').value; if(!k) return; $('persona').value = EXAMPLES[k]; if($('name').value.trim()==='' || $('name').value==='자비스') $('name').value='자비스'; $('examples').value=''; saveMe(); };
+
+// ---- 로그인 → 내 자비스 불러오기 ----
+function load(m){
+  $('name').value=m.name; $('persona').value=m.persona; $('wake').textContent=m.name; $('whoami').textContent='@'+m.id;
+  log.innerHTML=''; for(const c of m.chat) say(c.role==='me'?'me':(c.watch?'watch':''), c.text);
+  $('login').style.display='none'; startCam();
+}
+api('/api/me').then(load).catch(()=>{});
+$('login').querySelector('form').onsubmit = async e => {
+  e.preventDefault(); $('lerr').textContent='';
+  try{ load(await api('/api/login','POST',{ id:$('lid').value, pw:$('lpw').value })); }catch(err){ $('lerr').textContent=err.message; }
+};
+// 설계도는 서버에 저장 (입력 멈추면 1초 뒤)
+let t; function saveMe(){ clearTimeout(t); $('saved').textContent='…'; t=setTimeout(async()=>{
+  try{ await api('/api/me','PUT',{ name:NAME(), persona:$('persona').value }); $('wake').textContent=NAME(); $('saved').textContent='저장됨'; }catch(e){ $('saved').textContent='저장 실패'; } }, 1000); }
+$('name').oninput = $('persona').oninput = saveMe;
+
+// ---- 카메라 ----
+// OBS 같은 가상 카메라가 기본으로 잡히는 PC가 있어서, 장치 목록을 보여주고 진짜 카메라를 우선 고른다
+const sel = $('camsel'), VIRTUAL = /obs|virtual|가상|snap|droidcam|manycam/i;
+async function startCam(id){
+  try {
+    if(cam.srcObject) cam.srcObject.getTracks().forEach(t=>t.stop());
+    cam.srcObject = await navigator.mediaDevices.getUserMedia({ video:{ width:640, height:480, deviceId: id?{exact:id}:undefined }, audio:false });
+    const cams = (await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput');
+    sel.innerHTML = cams.map(d=>`<option value="${d.deviceId}">${d.label||'카메라'}</option>`).join('');
+    const cur = cam.srcObject.getVideoTracks()[0].getSettings().deviceId; sel.value = cur;
+    if(!id){ // 처음 켤 때: 저장된 선택 → 가상 아닌 첫 장치 순으로
+      let want; try{ want = localStorage.getItem('jv.cam'); }catch{}
+      const real = cams.find(d=>d.deviceId===want) || cams.find(d=>!VIRTUAL.test(d.label));
+      if(real && real.deviceId!==cur) return startCam(real.deviceId);
+    } else { try{ localStorage.setItem('jv.cam', id); }catch{} }
+    setState('', '준비 완료 · '+(sel.selectedOptions[0]?.text||''));
+  } catch(e){ setState('', '카메라를 못 켰어요: '+e.message+' (localhost 또는 https에서만 됩니다)'); }
+}
+sel.onchange = () => startCam(sel.value);
+const frame = () => {
+  if(!cam.videoWidth) return null;
+  cv.width=640; cv.height=Math.round(640*cam.videoHeight/cam.videoWidth);
+  cv.getContext('2d').drawImage(cam,0,0,cv.width,cv.height);
+  return cv.toDataURL('image/jpeg', .6);
+};
+
+// ---- 말하기 (TTS) ----
+const voice = () => speechSynthesis.getVoices().find(v=>/ko/i.test(v.lang)) || null;
+const speak = text => new Promise(ok => {
+  const u = new SpeechSynthesisUtterance(text); u.lang='ko-KR'; u.voice=voice(); u.rate=1.05;
+  u.onend = u.onerror = ok; speechSynthesis.cancel(); speechSynthesis.speak(u);
+});
+
+// ---- 듣기 (STT, 호출어) ----
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec=null, listening=false, busy=false;
+function startRec(){
+  if(!SR || !listening || busy) return;
+  rec = new SR(); rec.lang='ko-KR'; rec.continuous=true; rec.interimResults=true;
+  rec.onresult = e => {
+    const r = e.results[e.results.length-1], t = r[0].transcript.trim();
+    sub.textContent = t;
+    if(!r.isFinal) return;
+    const wake = NAME(), i = t.indexOf(wake);   // 호출어 뒤의 말만 전달
+    if(i<0) return;
+    const q = t.slice(i+wake.length).replace(/^[\s,.!?야아님]+/,'').trim() || '불렀어. 지금 뭐 보이는지 말해줘';
+    ask(q);
+  };
+  rec.onend = () => { rec=null; if(listening && !busy) setTimeout(startRec, 300); }; // 크롬이 수시로 끊어서 다시 켬
+  rec.onerror = e => { if(e.error==='not-allowed'){ listening=false; $('mic').classList.remove('on'); setState('', '마이크 권한이 없어요'); } };
+  rec.start(); setState('listening', '"'+NAME()+'" 하고 불러보세요');
+}
+const stopRec = () => { if(rec){ rec.onend=null; rec.abort(); rec=null; } };
+$('mic').onclick = () => {
+  if(!SR) return setState('', '이 브라우저는 음성 인식이 안 돼요 (크롬을 쓰세요). 아래 입력창으로 대화하세요');
+  listening = !listening;
+  $('mic').classList.toggle('on', listening); $('mic').textContent = listening ? '🎙 듣는 중' : '🎙 듣기 켜기';
+  if(listening) startRec(); else { stopRec(); setState('', '대기'); }
+};
+const idle = () => { if(listening) startRec(); else setState('', watching ? '관찰 중' : '대기'); };
+
+// ---- 질문 → 서버 → 대답 ----
+async function ask(text){
+  if(busy) return; busy=true; stopRec(); // 자기 목소리를 듣지 않게 대답 끝날 때까지 인식 중단
+  say('me', text); sub.textContent=''; setState('thinking', NAME()+' 생각 중…');
+  try {
+    const j = await api('/api/chat','POST',{ text, img:frame() });
+    say('', j.reply); sub.textContent = j.reply; setState('speaking', NAME()+' 말하는 중');
+    await speak(j.reply);
+  } catch(e){ say('err', e.message); }
+  busy=false; idle();
+}
+$('look').onclick = () => ask('지금 카메라에 뭐가 보이는지 말해줘');
+$('ask').onkeydown = e => { if(e.key==='Enter' && $('ask').value.trim()){ ask($('ask').value.trim()); $('ask').value=''; } };
+$('reset').onclick = async () => { await api('/api/reset','POST'); log.innerHTML=''; recent=[]; say('', '기억을 지웠어요'); };
+
+// ---- 자동 관찰: N초마다 프레임 → 설계도대로 판단 → HUD, 필요할 때만 말함 ----
+let watching=false, wtimer=null, recent=[];
+async function tick(){
+  if(!watching || busy) return;                  // 대화 중이면 이번 틱은 건너뜀
+  const img = frame(); if(!img) return;
+  busy=true; stopRec();
+  try {
+    const j = await api('/api/watch','POST',{ img, recent });
+    hud.textContent = j.hud; hud.style.display = j.hud ? 'block' : 'none';
+    recent.push(j.hud); recent = recent.slice(-6);
+    alerting = j.alert;
+    if(j.say){ say('watch', j.say); sub.textContent=j.say; setState('speaking', NAME()+' 말하는 중'); await speak(j.say); }
+  } catch(e){ if(!/아직 대답 중/.test(e.message)) say('err', e.message); }
+  busy=false; idle();
+}
+$('watch').onclick = () => {
+  watching = !watching; $('watch').classList.toggle('on', watching); $('watch').textContent = watching ? '👁 관찰 중' : '👁 자동 관찰';
+  clearInterval(wtimer); alerting=false;
+  if(watching){ tick(); wtimer = setInterval(tick, +$('every').value*1000); } else { hud.style.display='none'; recent=[]; }
+  idle();
+};
+$('every').onchange = () => { if(watching){ clearInterval(wtimer); wtimer = setInterval(tick, +$('every').value*1000); } };
+</script>
+</body>
+</html>

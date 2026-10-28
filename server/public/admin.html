@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>아레나 관리자</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Lilita+One&family=Noto+Sans+KR:wght@400;700;900&display=swap">
+<link rel="stylesheet" href="/style.css"></head>
+<body><div class="wrap">
+  <header><h1>관리자 · 햄스터 아레나</h1></header>
+  <div id="login" class="panel"><div class="row"><input id="pw" type="password" placeholder="관리자 비밀번호" style="flex:1"><button id="loginBtn">입장</button></div><div class="err" id="loginErr"></div></div>
+  <div id="ctl" class="panel row" hidden>
+    <button id="start">라운드 시작</button>
+    <button class="ghost" id="mode">종목</button>
+    <button class="ghost" id="speed">속도 1×</button>
+    <button class="ghost" id="reset">점수·라운드 초기화</button>
+    <span class="err" id="err"></span>
+    <div class="note" id="usage" style="width:100%"></div>
+  </div>
+  <section class="panel" id="lifePanel" hidden><h3>인생 시뮬레이션 · 대본과 미션</h3>
+    <div class="note">한 줄에 한 해: <code>12: 역대급 한파가 찾아온다</code>. 빈 해는 평범하게 지나가고, 마지막 줄 나이가 인생의 끝. 참가자와 코치에게는 비공개.</div>
+    <textarea id="script" rows="10" spellcheck="false"></textarea>
+    <div class="note" style="margin-top:8px">미션 — 한 줄에 하나. "작성 시작"을 누르면 팀마다 하나씩 균등·무작위 배정</div>
+    <textarea id="missions" rows="4"></textarea>
+    <div class="row" style="margin-top:8px"><button class="ghost" id="saveLife">저장</button><button id="writeStart">미션 배정 · 성격 작성 30분 시작</button><label class="note"><input type="checkbox" id="reshuffle" style="width:auto"> 이미 받은 미션도 다시 섞기</label><span class="note" id="lifeInfo"></span></div>
+  </section>
+  <div class="grid">
+    <section class="arena">
+      <canvas id="cv" width="600" height="440" aria-label="경기장"></canvas>
+      <div class="note" id="status">연결 중…</div>
+      <div class="board" id="board"></div>
+      <div id="result" class="note"></div>
+    </section>
+    <section class="panel"><h3>팀 · 페르소나</h3><div id="users" class="note">로그인하면 보여요</div></section>
+  </div>
+  <div class="grid">
+    <section class="panel"><h3>점수판</h3><table><thead><tr><th>#</th><th>팀</th><th>점수</th><th>생존승</th><th>격파</th></tr></thead><tbody id="score"></tbody></table></section>
+    <section class="panel"><h3>라운드 기록</h3><div class="log" id="log"></div></section>
+  </div>
+</div>
+<script src="/arena.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+async function loadUsers(){try{const s=await api('/api/admin/state');$('login').hidden=true;$('ctl').hidden=false;
+  $('users').innerHTML=s.users.map(u=>`<div style="border-top:1px dashed var(--line);padding:8px 0;display:flex;gap:10px;align-items:flex-start">${avImg(u.name,u.av,'av lg')}<div style="flex:1"><b>${u.name}</b> · ${u.pts}점 ${u.persona?`<br><span>${u.persona.text}</span><br><small>${s.mode==='life'?`🎯 ${u.mission||'(미션 없음)'}<pre class="md">${u.persona.md.replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}</pre>`:s.mode==='sumo'?`${SUMO.rules(u.persona)} · ${SUMO.SKILL[u.persona.skill]} · “${u.persona.say.dash}” “${u.persona.say.ko}” “${u.persona.say.win}”`:s.mode==='boxing'?`${BOXING.STYLE[u.persona.style]} · ${BOXING.SKIN[u.persona.skin]} <i class="sw" style="background:${BOXING.COLORS[u.persona.glove]}"></i><i class="sw" style="background:${BOXING.COLORS[u.persona.trunk]}"></i> · “${u.persona.say.intro}” “${u.persona.say.down}” “${u.persona.say.win}”`:`“${u.persona.say}” · 공격 ${u.persona.a.toFixed(2)} 신중 ${u.persona.c.toFixed(2)} 아이템 ${u.persona.g.toFixed(2)} 즉흥 ${u.persona.r.toFixed(2)}`}</small>`:`<small>(페르소나 없음)${s.mode==='life'&&u.mission?' · 🎯 '+u.mission:''}</small>`}</div>${u.persona&&s.mode==='boxing'?'<span data-portrait></span>':''}<button class="ghost sm" onclick="del('${u.name}')">삭제</button></div>`).join('')||'아직 팀이 없어요';
+  if(s.mode==='boxing')$('users').querySelectorAll('[data-portrait]').forEach((el,i)=>el.replaceWith(portrait(s.users.filter(u=>u.persona)[i].persona)));
+  const u=s.usage,w=s.rate,pct=k=>w?.[k]?`${Math.round(w[k].utilization*100)}%`:'?',at=k=>w?.[k]?' (리셋 '+new Date(w[k].resetsAt*1000).toLocaleTimeString('ko',{hour:'2-digit',minute:'2-digit'})+')':'';
+  $('usage').textContent=`코치 호출 ${u.calls}회 · 입력 ${(u.in/1000).toFixed(1)}k · 출력 ${(u.out/1000).toFixed(1)}k 토큰 · $${u.cost.toFixed(2)} · 계정 5시간 창 ${pct('five_hour')}${at('five_hour')} · 7일 창 ${pct('seven_day')}`;
+  $('lifePanel').hidden=s.mode!=='life';
+  if(s.mode==='life'){const c=s.lifeCfg,L=s.life;for(const[id,v]of[['script',c.script],['missions',c.missions]])if(document.activeElement!==$(id)&&$(id).value!==v)$(id).value=v;
+    const n=(c.script.match(/^\s*\d+/gm)||[]).length;$('lifeInfo').textContent=`사건 ${n}개 · 미션 ${c.missions.split('\n').filter(x=>x.trim()).length}개 · 인생 ${L.n}/${L.lives} 끝${c.deadline>Date.now()?' · 작성 마감 '+new Date(c.deadline).toLocaleTimeString('ko',{hour:'2-digit',minute:'2-digit'}):c.deadline?' · 작성 마감됨':''}`;$('writeStart').disabled=s.phase==='play'}
+  $('start').textContent=s.mode==='life'?`${s.life.n+1}번째 인생 시작 (10분)`:`${s.modeName} 라운드 ${s.round} 시작`;$('start').disabled=s.phase==='play';$('mode').textContent=`종목: ${s.modeName} ⇄`;$('mode').disabled=s.phase==='play';$('speed').textContent=`속도 ${s.speed}×`}catch{}}
+window.del=async n=>{if(!confirm(n+' 팀을 삭제할까요?'))return;await api('/api/admin/delete',{name:n});loadUsers()};
+$('loginBtn').onclick=async()=>{$('loginErr').textContent='';try{await api('/api/admin/login',{pw:$('pw').value});loadUsers()}catch(e){$('loginErr').textContent=e.message}};
+$('pw').onkeydown=e=>{if(e.key==='Enter')$('loginBtn').click()};
+$('start').onclick=async()=>{$('err').textContent='';try{await api('/api/admin/start',{})}catch(e){$('err').textContent=e.message}};
+const MODES=['bomb','sumo','boxing','life'];
+$('saveLife').onclick=async()=>{$('err').textContent='';try{await api('/api/admin/life',{script:$('script').value,missions:$('missions').value});$('lifeInfo').textContent+=' · 저장됨'}catch(e){$('err').textContent=e.message}};
+$('writeStart').onclick=async()=>{$('err').textContent='';try{await api('/api/admin/life',{script:$('script').value,missions:$('missions').value});await api('/api/admin/life/start',{minutes:30,reshuffle:$('reshuffle').checked});$('reshuffle').checked=false}catch(e){$('err').textContent=e.message}};
+$('mode').onclick=async()=>{$('err').textContent='';try{await api('/api/admin/mode',{mode:MODES[(MODES.indexOf(window.STATE?.mode)+1)%MODES.length]})}catch(e){$('err').textContent=e.message}};
+$('speed').onclick=async()=>{const s=window.STATE?.speed||1;await api('/api/admin/speed',{speed:s===1?2:s===2?4:1})};
+$('reset').onclick=async()=>{if(confirm('모든 점수와 라운드 기록을 지울까요?'))await api('/api/admin/reset',{})};
+document.addEventListener('state',loadUsers);document.addEventListener('roundend',loadUsers);
+loadUsers();
+</script></body></html>
