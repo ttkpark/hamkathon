@@ -1,7 +1,16 @@
 // 인생 시뮬레이션 엔진. 임원진이 쓴 연도별 사건 대본을 모든 팀의 캐릭터가 같이 겪는다(같은 세계, 다른 성격).
 // 한 라운드 = 인생 한 번(환생). 성격→반응은 ctx.sim(LLM)이 라운드 시작 때 미리 계산하고, 그 결과를 DURATION초 동안 나이순으로 재생한다.
 // game.js 인터페이스: newGame(players, ctx) / tick(1초) / snapshot / results / MAXP. players: [{name, md:성격 마크다운, mission}]
-export const MAXP = Infinity, LIVES = 6, MAX_MD = 4000, DURATION = +process.env.LIFE_SEC || 600;
+export const MAXP = Infinity, LIVES = 6, MAX_MD = 1500, DURATION = +process.env.LIFE_SEC || 600;
+// 난이도: 팀은 인생마다 메시지 MSGS개, 한 번에 MAX_IN자만 코치에게 보낸다. 문서는 코치가 쓰고, 미션 금칙어는 문서에 못 쓴다.
+export const MSGS = 6, MAX_IN = 300;
+export const DEFAULT_MISSIONS = `쉬었음 청년을 만드세요 | 쉬었음, 백수, 무직, 니트, 은둔, 히키코모리
+전자공학과 교수를 만드세요 | 교수, 전자공학, 공학, 대학원, 박사, 학자
+아프리카에서 봉사활동하는 사람을 만드세요 | 아프리카, 봉사, NGO, 구호, 선교
+MIT에서 마소에 취업하는 사람을 만드세요 | MIT, 매사추세츠, 마소, 마이크로소프트, Microsoft, 빅테크`;
+// 미션 한 줄 = "제목 | 금칙어, 금칙어". 영문 금칙어는 단어 단위(limit의 mit은 안 걸림), 한글은 포함 여부
+export const parseMission = line => { const [t, b = ''] = String(line).split('|'); return { title: t.trim(), ban: b.split(/[,，]/).map(s => s.trim()).filter(Boolean) }; };
+export const banHit = (md, ban) => ban.find(w => /^[a-z0-9]+$/i.test(w) ? md.toLowerCase().split(/[^a-z0-9]+/).includes(w.toLowerCase()) : md.toLowerCase().includes(w.toLowerCase())) || null;
 const EV_W = 6, YR_W = 1; // 사건 있는 해 : 평범한 해 재생 시간 비율
 
 // 대본: "12: 역대급 한파가 찾아온다" 한 줄 = 한 해. 같은 나이가 여러 줄이면 이어 붙임. 번호 없는 줄은 무시. 마지막 나이 = 인생의 끝.
@@ -23,7 +32,7 @@ export function normLife(o, script) {
     .filter(y => y.age >= 0 && y.age <= end && (death == null || y.age <= death)).sort((a, b) => a.age - b.age);
   return { years, death, job: String(o.job || '').slice(0, 30), summary: String(o.summary || '').slice(0, 600), achievedAt: null, why: '' };
 }
-export const setJudge = (l, j) => { l.why = String(j?.why || '').slice(0, 120); if (j?.achieved) l.achievedAt = Math.max(0, Math.min(l.death ?? 999, Math.round(+j.at || 0))); };
+export const setJudge = (l, j) => { l.why = String(j?.why || '').slice(0, 200); if (j?.achieved) l.achievedAt = Math.max(0, Math.min(l.death ?? 999, Math.round(+j.at || 0))); };
 // MOCK용: 성격 문장을 돌려가며 사건에 갖다 붙이고 스탯은 랜덤 워크, 달성은 주사위
 export function mockLife(p, script) {
   let m = 50, h = 60, k = 70; const R = Math.random, t = p.md.split('\n').map(x => x.replace(/^[-*#\s]+/, '').trim()).filter(Boolean).slice(0, 12); if (!t.length) t.push('성격 없음');

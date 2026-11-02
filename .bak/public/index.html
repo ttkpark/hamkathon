@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>전파폭탄 아레나</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Lilita+One&family=Noto+Sans+KR:wght@400;700;900&display=swap">
+<link rel="stylesheet" href="/style.css"></head>
+<body>
+<!-- 로그인 -->
+<div class="login" id="login">
+  <form class="card" id="loginForm">
+    <h1>전파폭탄 아레나</h1>
+    <p class="sub">팀 이름으로 계속하기. 처음 쓰는 이름이면 그 비밀번호로 팀이 만들어져요.</p>
+    <input id="name" placeholder="팀 이름" maxlength="12" autocomplete="username" required>
+    <input id="pw" type="password" placeholder="비밀번호" autocomplete="current-password" required>
+    <button id="loginBtn">계속</button>
+    <div class="err" id="loginErr"></div>
+  </form>
+</div>
+
+<!-- 앱 -->
+<div class="app" id="app" hidden>
+  <aside class="side">
+    <div class="brand" id="brand">햄스터 아레나</div>
+    <div class="profile">
+      <img class="av lg" id="meAv" alt="" hidden><div class="av lg" id="meAvEmpty" style="display:grid;place-items:center;font-size:36px">🐹</div>
+      <div class="name" id="meName"></div>
+      <div class="note" id="persona">아직 페르소나가 없어요</div>
+      <div class="say" id="say"></div>
+      <div id="portrait"></div>
+      <div class="traits" id="traits"></div>
+      <div class="row" style="justify-content:center"><button class="ghost sm" id="mkAv">프로필 이미지 만들기</button><button class="ghost sm" id="resetChat">새 대화</button><button class="ghost sm" id="logout">나가기</button></div>
+      <input type="file" id="avFile" accept="image/*" hidden>
+    </div>
+    <div><h3>점수판</h3><div class="list" id="score"></div></div>
+    <div><h3>라운드 기록</h3><div class="log" id="log"></div></div>
+    <p class="note" id="rules"></p>
+  </aside>
+  <main class="main">
+    <div class="top"><span class="status" id="status">연결 중…</span><button class="ghost sm" id="toggleArena">아레나 보기</button></div>
+    <div class="arenaWrap" id="arenaWrap" hidden><div class="arena">
+      <canvas id="cv" width="600" height="440" aria-label="경기장"></canvas>
+      <div class="board" id="board"></div><div id="result" class="note"></div>
+    </div></div>
+    <div class="thread"><div class="in" id="chat"></div></div>
+    <form class="composer" id="form">
+      <div class="box"><button type="button" class="ghost sm" id="attach" title="사진 첨부 — 코치가 보고 프로필로 쓰거나 참고해 그려요">📎</button><span id="pending" hidden style="position:relative"><img id="pendImg" class="av" alt=""><button type="button" class="sm" id="pendX" style="position:absolute;top:-8px;right:-8px;padding:0 5px;border-radius:50%;line-height:1.4">×</button></span><textarea id="text" rows="1" placeholder="코치에게 말하기 — 봇 성격, 전략, 프로필 이미지 뭐든지"></textarea><button id="send">보내기</button></div>
+      <div class="hint" id="hint">Enter 전송 · Shift+Enter 줄바꿈</div>
+    </form>
+  </main>
+</div>
+<script src="/arena.js"></script>
+<script>
+const $=id=>document.getElementById(id), esc=s=>s.replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+const TR=[['a','공격성'],['c','신중함'],['g','아이템욕'],['r','즉흥성']];
+const STARTERS={bomb:['겁 많지만 아이템은 다 챙기는 햄스터','보이는 건 다 터뜨리는 돌격형','구석에서 버티다 막판에 나서는 타입','우리 팀 프로필 이미지 그려줘'],
+  sumo:['제일 가까운 놈한테 박치기하는 돌격형','가장자리에 몰린 놈만 노리는 묵직한 사냥꾼','피했다가 반사 장갑으로 되받아치는 타입','아이템 챙기며 끝까지 버티는 생존형'],
+  boxing:['잽 거리에서 치고 빠지는 아웃복서, 크롬 몸에 노란 장갑','파고들어 보디 때리는 인파이터, 검정 무광에 빨간 트렁크','가드 굳히고 기다리는 카운터, 하얀 석고','가드 따위 없이 스트레이트만 던지는 난타형'],
+  life:['성격 문서는 어떻게 쓰면 좋아?','우리 미션 달성 전략 같이 짜줘','예시 성격 문서 하나 보여줘']};
+const RULES={bomb:'규칙: 폭탄은 1.8초 뒤 십자로 터짐. 잡음 블록을 깨면 <b>R</b> 범위+1, <b>B</b> 폭탄+1, <b>S</b> 속도. 생존 3점, 격파 1점. 오래 버티면 잡음 폭풍.',
+  sumo:'규칙: 공 속 햄스터가 서로 들이받아 밀어냄. 판 밖으로 떨어지면 목숨 -1(3개). 15초 뒤부터 판이 줄어듦. 우승 3점, 밀어 떨어뜨리면(KO) 1점. 아이템: 쳇바퀴·방패·전파 충격파.',
+  life:'규칙: 햄스터 한 명의 <b>성격을 마크다운 문서</b>로 적어 코치에게 보내면 저장돼요(붙여넣기 OK, Shift+Enter 줄바꿈). 캐릭터는 1~80세를 살며 매년 사건을 겪고, 성격대로 반응해요. 사건은 비공개. 10분짜리 인생을 6번 환생하며 미션을 달성한 인생마다 1점. 인생 사이에 성격을 고칠 수 있어요.',
+  boxing:'규칙: 마네킹 둘이 1대1 <b>토너먼트</b>. 3라운드 × 30초, 다운 세 번이나 10카운트면 KO, 아니면 판정. 경기 승리 3점, 다운 뺏을 때마다 1점. 실력은 모두 같아요 — 대회 전에 정한 스타일·생김새·대사가 그대로 끝까지 갑니다.'};
+let ME=null;
+function renderMe(m){
+  ME=m;$('login').hidden=true;$('app').hidden=false;$('meName').textContent=`${m.name} · ${m.pts}점`;
+  const has=!!m.av;$('meAv').hidden=!has;$('meAvEmpty').style.display=has?'none':'grid';if(has)$('meAv').src=`/api/avatar?name=${encodeURIComponent(m.name)}&v=${m.av}`;
+  $('mkAv').textContent=has?'프로필 다시 그리기':'프로필 이미지 만들기';
+  $('portrait').replaceChildren();
+  if(m.mode==='life'){const p=m.persona;$('persona').textContent=p?p.text||'성격 문서 제출됨':'아직 성격 문서가 없어요 — 코치에게 마크다운으로 보내세요';$('say').textContent=m.mission?`🎯 미션: ${m.mission}`:'미션은 작성 시작 때 배정돼요';$('traits').innerHTML=p?`<pre class="md">${esc(p.md)}</pre>`:''}
+  else if(m.persona&&m.mode==='sumo'){const p=m.persona;$('persona').textContent=p.text;$('say').textContent=`“${p.say.dash}” · “${p.say.ko}” · “${p.say.win}”`;
+    $('traits').innerHTML=p.rules.map(r=>`<span>${r.name}<br><small>${SUMO.WHEN[r.when]} → ${SUMO.ACT[r.act]}</small></span><meter min="0" max="1" value="${r.w}"></meter><b>${r.w}</b>`).join('')+`<span>필살기</span><i></i><b>${SUMO.SKILL[p.skill]}</b>`}
+  else if(m.persona&&m.mode==='boxing'){const p=m.persona;$('persona').textContent=p.text;$('say').textContent=`“${p.say.intro}” · “${p.say.down}” · “${p.say.win}”`;$('portrait').append(portrait(p));
+    $('traits').innerHTML=`<span>스타일</span><i></i><b>${BOXING.STYLE[p.style]}</b><span>몸 재질</span><i></i><b>${BOXING.SKIN[p.skin]}</b><span>장갑·트렁크</span><i></i><b><i class="sw" style="background:${BOXING.COLORS[p.glove]}"></i><i class="sw" style="background:${BOXING.COLORS[p.trunk]}"></i></b>`}
+  else if(m.persona){$('persona').textContent=m.persona.text;$('say').textContent=`“${m.persona.say}”`;
+    $('traits').innerHTML=TR.map(([k,l])=>`<span>${l}</span><meter min="0" max="1" value="${m.persona[k]}"></meter><b>${(+m.persona[k]).toFixed(2)}</b>`).join('')}
+  else{$('persona').textContent='아직 페르소나가 없어요';$('say').textContent='';$('traits').innerHTML=''}
+  $('chat').innerHTML=m.chat.length?m.chat.map(c=>bubble(c.role,c.text,c.img)).join(''):
+    `<div class="empty"><b>안녕하세요, ${esc(m.name)} 팀!</b>저는 봇 코치예요. 어떤 햄스터로 싸울지 편하게 말해주세요.<br>성격을 정하면 프로필 이미지도 그려드려요.${m.offline?'<br><small>(지금은 오프라인 모드 — 간단한 성향 분석만 돼요)</small>':''}<div class="chips">${(STARTERS[m.mode]||STARTERS.bomb).map(s=>`<button type="button" class="ghost sm" onclick="say(this.textContent)">${s}</button>`).join('')}</div></div>`;
+  document.querySelector('.thread').scrollTop=1e9;
+}
+const bubble=(role,text,img)=>`<div class="msg ${role}">${role==='assistant'?'<div class="ic">⚡</div>':''}<div class="b">${img?`<img src="${typeof img==='number'?`/api/img?name=${encodeURIComponent(ME.name)}&n=${img}`:img}" alt="" style="display:block;max-width:220px;max-height:220px;border-radius:10px;margin-bottom:${text?6:0}px">`:''}${esc(text)}</div></div>`;
+let PEND=null; // 첨부 대기 중인 사진 (data URL, 512px로 줄임)
+$('attach').onclick=()=>$('avFile').click();
+$('pendX').onclick=()=>{PEND=null;$('pending').hidden=true};
+$('avFile').onchange=async e=>{const f=e.target.files[0];if(!f)return;e.target.value='';
+  const im=new Image();im.src=URL.createObjectURL(f);await im.decode();
+  const S=512,r=Math.min(1,S/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=Math.round(im.width*r);c.height=Math.round(im.height*r);
+  const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.drawImage(im,0,0,c.width,c.height);
+  PEND=c.toDataURL('image/jpeg',.85);$('pendImg').src=PEND;$('pending').hidden=false;$('text').focus()};
+async function loadMe(){try{renderMe(await api('/api/me'))}catch{$('login').hidden=false;$('app').hidden=true}}
+$('loginForm').onsubmit=async e=>{e.preventDefault();$('loginErr').textContent='';try{await api('/api/login',{name:$('name').value,pw:$('pw').value});loadMe()}catch(e){$('loginErr').textContent=e.message}};
+window.say=async t=>{t=t.trim();const img=PEND;if((!t&&!img)||$('send').disabled)return;$('send').disabled=true;PEND=null;$('pending').hidden=true;
+  if($('chat').querySelector('.empty'))$('chat').innerHTML='';
+  $('chat').insertAdjacentHTML('beforeend',bubble('user',t,img)+bubble('assistant','…'));document.querySelector('.thread').scrollTop=1e9;$('text').value='';$('text').style.height='';
+  try{await api('/api/chat',{text:t,image:img})}catch(e){$('hint').textContent=e.message}
+  await loadMe();$('send').disabled=lockedNow()};
+const lockedNow=()=>{const s=window.STATE;return !s?false:s.phase==='play'||!!(s.life?.deadline&&Date.now()>s.life.deadline)};
+$('form').onsubmit=e=>{e.preventDefault();say($('text').value)};
+$('text').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();say($('text').value)}};
+$('text').oninput=e=>{e.target.style.height='';e.target.style.height=e.target.scrollHeight+'px'};
+$('mkAv').onclick=()=>say(ME?.av?'프로필 이미지를 다른 느낌으로 다시 그려줘':'우리 봇 프로필 이미지 그려줘');
+$('resetChat').onclick=async()=>{if(confirm('대화를 지울까요? 페르소나와 이미지는 유지돼요.')){await api('/api/chat/reset',{});loadMe()}};
+$('logout').onclick=async()=>{await api('/api/logout',{});location.reload()};
+let arenaOpen=false,auto=true;
+const showArena=v=>{arenaOpen=v;$('arenaWrap').hidden=!v;$('toggleArena').textContent=v?'아레나 닫기':'아레나 보기';if(v&&window.STATE)draw(window.STATE.live)};
+$('toggleArena').onclick=()=>{auto=false;showArena(!arenaOpen)};
+document.addEventListener('state',e=>{const play=e.detail.phase==='play',lock=lockedNow();$('rules').innerHTML=RULES[e.detail.mode]||'';$('brand').textContent=e.detail.modeName+' 아레나';if(ME&&ME.mode!==e.detail.mode)loadMe();$('send').disabled=lock;$('hint').textContent=play?'라운드 진행 중 — 끝나면 다시 고칠 수 있어요':lock?'성격 작성 마감 — 이번 인생이 끝나면 다시 고칠 수 있어요':'Enter 전송 · Shift+Enter 줄바꿈';if(play&&auto)showArena(true)});
+document.addEventListener('state',e=>{if(e.detail.life&&ME&&!ME.mission&&e.detail.life.deadline)loadMe()}); // 작성 시작 → 미션 받아오기
+document.addEventListener('roundend',()=>{auto=true;showArena(true);loadMe()});
+loadMe();
+</script></body></html>

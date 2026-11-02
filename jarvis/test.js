@@ -29,3 +29,19 @@ try {
   assert.equal(JSON.parse(fs.readFileSync(DATA,'utf8')).users['철수'].name, '프라이데이');   // 디스크에 남음
   console.log('ok');
 } finally { s.kill(); fs.rmSync(DATA, { force:true }); }
+
+// 외부 공개용 입구: 입장 키(jak 쿠키) · 실패 잠금 · 프록시(funnel) 뒤 실제 IP
+const g = spawn(process.execPath, ['server.js'], { env:{ ...process.env, MOCK:'1', PORT:'3198', ADMIN_PW:'pw', DATA, ACCESS_KEY:'k3y', FAILS:'2' }, stdio:['ignore','pipe','inherit'] });
+await new Promise(ok => g.stdout.on('data', ok));
+try {
+  const G = 'http://localhost:3198', get = (p,h={}) => fetch(G+p,{ headers:h, redirect:'manual' });
+  assert.equal((await get('/')).status, 401); assert.equal((await get('/api/me')).status, 401);
+  const r = await get('/admin?key=k3y'); assert.equal(r.status, 302); assert.equal(r.headers.get('location'), '/admin');
+  const ak = r.headers.get('set-cookie').split(';')[0]; assert.match(ak, /^jak=/); assert.ok(!ak.includes('k3y'));
+  assert.equal((await get('/', { cookie:ak })).status, 200);
+  const login = (pw, xff) => fetch(G+'/api/admin/login', { method:'POST', headers:{ 'content-type':'application/json', cookie:ak, ...(xff?{'x-forwarded-for':xff}:{}) }, body:JSON.stringify({ pw }) });
+  assert.equal((await login('no')).status, 401); assert.equal((await login('no')).status, 401);
+  assert.equal((await login('pw')).status, 429, '잠김 동안 맞는 비번도 거부');
+  const ok2 = await login('pw', '9.9.9.9, 203.0.113.9'); assert.equal(ok2.status, 200, '프록시 뒤 다른 접속자는 안 잠김'); assert.match(ok2.headers.get('set-cookie'), /^jsid=/);
+  console.log('security ok');
+} finally { g.kill(); fs.rmSync(DATA, { force:true }); }

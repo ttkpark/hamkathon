@@ -54,10 +54,10 @@ const TR=[['a','공격성'],['c','신중함'],['g','아이템욕'],['r','즉흥�
 const STARTERS={bomb:['겁 많지만 아이템은 다 챙기는 햄스터','보이는 건 다 터뜨리는 돌격형','구석에서 버티다 막판에 나서는 타입','우리 팀 프로필 이미지 그려줘'],
   sumo:['제일 가까운 놈한테 박치기하는 돌격형','가장자리에 몰린 놈만 노리는 묵직한 사냥꾼','피했다가 반사 장갑으로 되받아치는 타입','아이템 챙기며 끝까지 버티는 생존형'],
   boxing:['잽 거리에서 치고 빠지는 아웃복서, 크롬 몸에 노란 장갑','파고들어 보디 때리는 인파이터, 검정 무광에 빨간 트렁크','가드 굳히고 기다리는 카운터, 하얀 석고','가드 따위 없이 스트레이트만 던지는 난타형'],
-  life:['성격 문서는 어떻게 쓰면 좋아?','우리 미션 달성 전략 같이 짜줘','예시 성격 문서 하나 보여줘']};
+  life:['겁은 많은데 손재주 좋은 아이로 써줘','돈보다 사람한테 끌리는 성격으로 써줘','지금 문서의 약점 하나만 짚어줘']};
 const RULES={bomb:'규칙: 폭탄은 1.8초 뒤 십자로 터짐. 잡음 블록을 깨면 <b>R</b> 범위+1, <b>B</b> 폭탄+1, <b>S</b> 속도. 생존 3점, 격파 1점. 오래 버티면 잡음 폭풍.',
   sumo:'규칙: 공 속 햄스터가 서로 들이받아 밀어냄. 판 밖으로 떨어지면 목숨 -1(3개). 15초 뒤부터 판이 줄어듦. 우승 3점, 밀어 떨어뜨리면(KO) 1점. 아이템: 쳇바퀴·방패·전파 충격파.',
-  life:'규칙: 햄스터 한 명의 <b>성격을 마크다운 문서</b>로 적어 코치에게 보내면 저장돼요(붙여넣기 OK, Shift+Enter 줄바꿈). 캐릭터는 1~80세를 살며 매년 사건을 겪고, 성격대로 반응해요. 사건은 비공개. 10분짜리 인생을 6번 환생하며 미션을 달성한 인생마다 1점. 인생 사이에 성격을 고칠 수 있어요.',
+  life:'규칙: 코치에게 <b>짧게 지시</b>하면 코치가 햄스터의 <b>성격 문서</b>를 써서 바로 저장해요. 인생마다 <b>메시지 수와 글자 수</b>가 정해져 있고, 미션의 <b>금칙어</b>는 문서에 쓸 수 없어요. 코치는 우리 미션도 금칙어도 몰라요 — 필요한 건 직접 알려 주세요. 목표를 적는 대신 기질·습관·약점으로 미션 쪽에 끌려가게 만드세요. 캐릭터는 1~80세를 살며 매년 비공개 사건을 겪고, 목표보다 기질대로 움직여요. 인생 6번, 미션을 달성한 인생마다 1점. 인생이 끝나면 메시지가 다시 생겨요.',
   boxing:'규칙: 마네킹 둘이 1대1 <b>토너먼트</b>. 3라운드 × 30초, 다운 세 번이나 10카운트면 KO, 아니면 판정. 경기 승리 3점, 다운 뺏을 때마다 1점. 실력은 모두 같아요 — 대회 전에 정한 스타일·생김새·대사가 그대로 끝까지 갑니다.'};
 let ME=null;
 function renderMe(m){
@@ -65,7 +65,8 @@ function renderMe(m){
   const has=!!m.av;$('meAv').hidden=!has;$('meAvEmpty').style.display=has?'none':'grid';if(has)$('meAv').src=`/api/avatar?name=${encodeURIComponent(m.name)}&v=${m.av}`;
   $('mkAv').textContent=has?'프로필 다시 그리기':'프로필 이미지 만들기';
   $('portrait').replaceChildren();
-  if(m.mode==='life'){const p=m.persona;$('persona').textContent=p?p.text||'성격 문서 제출됨':'아직 성격 문서가 없어요 — 코치에게 마크다운으로 보내세요';$('say').textContent=m.mission?`🎯 미션: ${m.mission}`:'미션은 작성 시작 때 배정돼요';$('traits').innerHTML=p?`<pre class="md">${esc(p.md)}</pre>`:''}
+  $('text').maxLength=m.mode==='life'?m.maxIn:6000;$('text').placeholder=m.mode==='life'?`코치에게 짧게 지시하기 (${m.maxIn}자) — 성격 방향, 고칠 점`:'코치에게 말하기 — 봇 성격, 전략, 프로필 이미지 뭐든지';
+  if(m.mode==='life'){const p=m.persona;$('persona').textContent=p?p.text||'성격 문서 저장됨':'아직 성격 문서가 없어요 — 코치에게 어떤 성격인지 짧게 말해 보세요';$('say').textContent=m.mission?`🎯 미션: ${m.mission}${m.ban.length?` · 🚫 금칙어: ${m.ban.join(', ')}`:''}`:'미션은 작성 시작 때 배정돼요';$('traits').innerHTML=p?`<pre class="md">${esc(p.md)}</pre>`:''}
   else if(m.persona&&m.mode==='sumo'){const p=m.persona;$('persona').textContent=p.text;$('say').textContent=`“${p.say.dash}” · “${p.say.ko}” · “${p.say.win}”`;
     $('traits').innerHTML=p.rules.map(r=>`<span>${r.name}<br><small>${SUMO.WHEN[r.when]} → ${SUMO.ACT[r.act]}</small></span><meter min="0" max="1" value="${r.w}"></meter><b>${r.w}</b>`).join('')+`<span>필살기</span><i></i><b>${SUMO.SKILL[p.skill]}</b>`}
   else if(m.persona&&m.mode==='boxing'){const p=m.persona;$('persona').textContent=p.text;$('say').textContent=`“${p.say.intro}” · “${p.say.down}” · “${p.say.win}”`;$('portrait').append(portrait(p));
@@ -74,8 +75,8 @@ function renderMe(m){
     $('traits').innerHTML=TR.map(([k,l])=>`<span>${l}</span><meter min="0" max="1" value="${m.persona[k]}"></meter><b>${(+m.persona[k]).toFixed(2)}</b>`).join('')}
   else{$('persona').textContent='아직 페르소나가 없어요';$('say').textContent='';$('traits').innerHTML=''}
   $('chat').innerHTML=m.chat.length?m.chat.map(c=>bubble(c.role,c.text,c.img)).join(''):
-    `<div class="empty"><b>안녕하세요, ${esc(m.name)} 팀!</b>저는 봇 코치예요. 어떤 햄스터로 싸울지 편하게 말해주세요.<br>성격을 정하면 프로필 이미지도 그려드려요.${m.offline?'<br><small>(지금은 오프라인 모드 — 간단한 성향 분석만 돼요)</small>':''}<div class="chips">${(STARTERS[m.mode]||STARTERS.bomb).map(s=>`<button type="button" class="ghost sm" onclick="say(this.textContent)">${s}</button>`).join('')}</div></div>`;
-  document.querySelector('.thread').scrollTop=1e9;
+    `<div class="empty"><b>안녕하세요, ${esc(m.name)} 팀!</b>${m.mode==='life'?`짧게 지시하면 제가 성격 문서를 써서 저장해요.<br>메시지는 인생마다 ${m.msgs}개, 한 번에 ${m.maxIn}자예요. 한 마디 한 마디 아껴 쓰세요.`:'저는 봇 코치예요. 어떤 햄스터로 싸울지 편하게 말해주세요.<br>성격을 정하면 프로필 이미지도 그려드려요.'}${m.offline?'<br><small>(지금은 오프라인 모드 — 간단한 성향 분석만 돼요)</small>':''}<div class="chips">${(STARTERS[m.mode]||STARTERS.bomb).map(s=>`<button type="button" class="ghost sm" onclick="say(this.textContent)">${s}</button>`).join('')}</div></div>`;
+  document.querySelector('.thread').scrollTop=1e9;$('hint').textContent=hintNow();$('send').disabled=lockedNow();
 }
 const bubble=(role,text,img)=>`<div class="msg ${role}">${role==='assistant'?'<div class="ic">⚡</div>':''}<div class="b">${img?`<img src="${typeof img==='number'?`/api/img?name=${encodeURIComponent(ME.name)}&n=${img}`:img}" alt="" style="display:block;max-width:220px;max-height:220px;border-radius:10px;margin-bottom:${text?6:0}px">`:''}${esc(text)}</div></div>`;
 let PEND=null; // 첨부 대기 중인 사진 (data URL, 512px로 줄임)
@@ -91,9 +92,12 @@ $('loginForm').onsubmit=async e=>{e.preventDefault();$('loginErr').textContent='
 window.say=async t=>{t=t.trim();const img=PEND;if((!t&&!img)||$('send').disabled)return;$('send').disabled=true;PEND=null;$('pending').hidden=true;
   if($('chat').querySelector('.empty'))$('chat').innerHTML='';
   $('chat').insertAdjacentHTML('beforeend',bubble('user',t,img)+bubble('assistant','…'));document.querySelector('.thread').scrollTop=1e9;$('text').value='';$('text').style.height='';
-  try{await api('/api/chat',{text:t,image:img})}catch(e){$('hint').textContent=e.message}
-  await loadMe();$('send').disabled=lockedNow()};
-const lockedNow=()=>{const s=window.STATE;return !s?false:s.phase==='play'||!!(s.life?.deadline&&Date.now()>s.life.deadline)};
+  let err='';try{await api('/api/chat',{text:t,image:img})}catch(e){err=e.message}
+  await loadMe();if(err)$('hint').textContent=err};
+const lockedNow=()=>{const s=window.STATE;return !s?false:s.phase==='play'||!!(s.life?.deadline&&Date.now()>s.life.deadline)||(ME?.mode==='life'&&(!ME.mission||ME.left===0))};
+// 입력창 아래 안내: 진행 중/마감이면 그 이유, 아니면 (인생) 남은 메시지·글자 수
+const hintNow=()=>{const s=window.STATE;return s?.phase==='play'?'라운드 진행 중 — 끝나면 다시 고칠 수 있어요':s?.life?.deadline&&Date.now()>s.life.deadline?'성격 작성 마감 — 이번 인생이 끝나면 다시 고칠 수 있어요':idleHint()};
+const idleHint=()=>ME?.mode==='life'?(ME.mission?ME.left===0?'이번 인생의 메시지를 다 썼어요 — 인생이 끝나면 다시 생겨요':`남은 메시지 ${ME.left??ME.msgs}/${ME.msgs} · 한 번에 ${ME.maxIn}자 · Enter 전송`:'성격 작성 시작 전이에요 — 시작하면 미션이 배정돼요'):'Enter 전송 · Shift+Enter 줄바꿈';
 $('form').onsubmit=e=>{e.preventDefault();say($('text').value)};
 $('text').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();say($('text').value)}};
 $('text').oninput=e=>{e.target.style.height='';e.target.style.height=e.target.scrollHeight+'px'};
@@ -103,7 +107,7 @@ $('logout').onclick=async()=>{await api('/api/logout',{});location.reload()};
 let arenaOpen=false,auto=true;
 const showArena=v=>{arenaOpen=v;$('arenaWrap').hidden=!v;$('toggleArena').textContent=v?'아레나 닫기':'아레나 보기';if(v&&window.STATE)draw(window.STATE.live)};
 $('toggleArena').onclick=()=>{auto=false;showArena(!arenaOpen)};
-document.addEventListener('state',e=>{const play=e.detail.phase==='play',lock=lockedNow();$('rules').innerHTML=RULES[e.detail.mode]||'';$('brand').textContent=e.detail.modeName+' 아레나';if(ME&&ME.mode!==e.detail.mode)loadMe();$('send').disabled=lock;$('hint').textContent=play?'라운드 진행 중 — 끝나면 다시 고칠 수 있어요':lock?'성격 작성 마감 — 이번 인생이 끝나면 다시 고칠 수 있어요':'Enter 전송 · Shift+Enter 줄바꿈';if(play&&auto)showArena(true)});
+document.addEventListener('state',e=>{const play=e.detail.phase==='play',lock=lockedNow();$('rules').innerHTML=RULES[e.detail.mode]||'';$('brand').textContent=e.detail.modeName+' 아레나';if(ME&&ME.mode!==e.detail.mode)loadMe();$('send').disabled=lock;$('hint').textContent=hintNow();if(play&&auto)showArena(true)});
 document.addEventListener('state',e=>{if(e.detail.life&&ME&&!ME.mission&&e.detail.life.deadline)loadMe()}); // 작성 시작 → 미션 받아오기
 document.addEventListener('roundend',()=>{auto=true;showArena(true);loadMe()});
 loadMe();

@@ -44,6 +44,9 @@ import * as life from './life.js';
   const sc = life.parseScript('12: 한파\n3세: 로봇\n잡담\n12 - 또 한파\n80. 끝');
   assert.deepEqual(sc.map(s=>s.age), [3,12,80]); assert.equal(sc[1].text, '한파 또 한파');
   assert.equal(life.parseScript(life.DEFAULT_SCRIPT).length, 80);
+  const mi = life.parseMission('MIT에서 마소에 취업 | MIT, 마소 ,Microsoft'); assert.deepEqual(mi, { title:'MIT에서 마소에 취업', ban:['MIT','마소','Microsoft'] });
+  assert.equal(life.banHit('submit, limit, admit', mi.ban), null, '영문 금칙어는 단어 단위'); assert.equal(life.banHit('나는 mit에 간다', mi.ban), 'MIT'); assert.equal(life.banHit('마소 좋아', mi.ban), '마소');
+  assert.equal(life.DEFAULT_MISSIONS.split('\n').map(life.parseMission).filter(m=>m.ban.length).length, 4, '기본 미션 4개 모두 금칙어');
   const g = life.newGame([{name:'a',md:'# 고집\n- 겁 많음',mission:'교수'},{name:'b',md:'',mission:'청년'}], { script:sc, sim:async(ps,s)=>ps.map(p=>life.mockLife(p,s)) });
   life.tick(g); assert.equal(g.t, 0, '계산 전엔 멈춤');
   await new Promise(r=>setTimeout(r,20)); let n=0; while(!g.over&&n++<5000) life.tick(g);
@@ -110,13 +113,21 @@ try {
   assert.equal(st.lastRound.results.length,4,'2경기 × 2명'); assert.equal(st.lastRound.results.filter(r=>r.survived).length,2,'경기마다 승자 1명');
   // 종목 전환 → 인생 시뮬레이션: 작성 시작(미션 배정) → 문서 제출 → 마감 잠금 → 인생 1회
   assert.equal((await call('/api/admin/mode',{mode:'life'},adm.cookie)).j.mode,'life');
-  assert.ok((await call('/api/admin/life',{missions:'교수\n청년'},adm.cookie)).ok);
-  assert.ok((await call('/api/admin/life/start',{minutes:1},adm.cookie)).ok);
-  const ms=(await call('/api/admin/state',null,adm.cookie)).j.users.map(u=>u.mission).sort(); assert.deepEqual(ms,['교수','교수','청년'].sort().slice(0,ms.length),'균등 배정');
+  assert.equal((await call('/api/me',null,a.cookie)).j.chat.length,0,'인생으로 바꾸면 예전 종목 대화는 화면에서 빠짐');
+  assert.equal((await call('/api/chat',{text:'- 고집'},a.cookie)).ok,false,'작성 시작 전엔 잠김');
+  assert.ok((await call('/api/admin/life',{missions:'교수 | 교수, 박사\n청년'},adm.cookie)).ok);
+  assert.ok((await call('/api/admin/life/start',{minutes:1,msgs:2},adm.cookie)).ok);
+  const who={팀A:a,팀B:b,팀C:tc}, prof=(await call('/api/admin/state',null,adm.cookie)).j.users.find(u=>u.mission==='교수');
+  assert.deepEqual(prof.ban,['교수','박사']); assert.equal(prof.left,2);
+  const bn=await call('/api/chat',{text:'- 박사가 꿈'},who[prof.name].cookie); assert.ok(bn.ok&&!bn.j.persona&&bn.j.left===2,'금칙어 → 저장 거부, 메시지 환불'); assert.match(bn.j.chat.at(-1).text,/금칙어/);
+  assert.equal((await call('/api/chat',{text:'가'.repeat(301)},a.cookie)).ok,false,'300자 초과 거부');
+  const ms=(await call('/api/admin/state',null,adm.cookie)).j.users.map(u=>u.mission).sort(); assert.ok(ms.length===3&&Math.abs(ms.filter(m=>m==='교수').length-ms.filter(m=>m==='청년').length)===1,'균등 배정');
   assert.equal((await call('/api/me',null,a.cookie)).j.mission.length>0,true);
   const la=await call('/api/chat',{text:'# 우리 햄스터\n- 고집이 세다\n- 겨울을 싫어한다'},a.cookie); assert.equal(la.j.persona.md.split('\n').length,3); assert.equal(la.j.persona.text,'우리 햄스터');
   assert.equal((await call('/api/admin/start',{},adm.cookie)).ok,false,'문서 낸 팀이 1팀뿐');
   await call('/api/chat',{text:'- 돈이 최고'},b.cookie);
+  assert.equal((await call('/api/chat',{text:'- 겁이 많다'},a.cookie)).j.left,0);
+  assert.equal((await call('/api/chat',{text:'- 하나 더'},a.cookie)).ok,false,'메시지 예산 소진');
   assert.ok((await call('/api/admin/start',{},adm.cookie)).ok);
   assert.equal((await call('/api/state')).j.live.kind,'life');
   for(let i=0;i<300;i++){ await new Promise(r=>setTimeout(r,200)); st=(await call('/api/state')).j; if(st.phase==='tune') break; }
@@ -128,3 +139,28 @@ try {
   assert.ok((await call('/api/me',null,a.cookie)).j.persona.c>.5,'bomb persona kept');
   console.log('e2e ok', st.scoreboard);
 } finally { srv.kill(); fs.rmSync(DATA,{force:true}); }
+
+// 보안: 입장 키 · 실패 잠금 · 팀 이름 검증 · 폼 POST 차단 · 보안 헤더
+const sec = spawn(process.execPath,['server.js'],{env:{...process.env,MOCK:'1',PORT:'3998',ADMIN_PW:'x',DATA,ACCESS_KEY:'k3y',FAILS:'3'},stdio:['ignore','pipe','inherit']});
+await new Promise(ok=>sec.stdout.on('data',d=>{ if(String(d).includes('http://')) ok(); }));
+try {
+  const S='http://localhost:3998', get=(p,h={})=>fetch(S+p,{headers:h,redirect:'manual'});
+  let r=await get('/'); assert.equal(r.status,401); assert.match(await r.text(),/입장 키/);
+  assert.equal((await get('/api/state')).status,401); assert.equal((await get('/api/avatar?name=x')).status,401);
+  assert.equal((await get('/?key=nope')).status,401,'틀린 키');
+  r=await get('/admin?key=k3y'); assert.equal(r.status,302); assert.equal(r.headers.get('location'),'/admin');
+  const ak=r.headers.get('set-cookie').split(';')[0]; assert.ok(!ak.includes('k3y'),'쿠키에 키 원문 없음');
+  assert.match((await get('//evil.com?key=k3y')).headers.get('location'),/^\/(?!\/)/,'외부로 튕기지 않음');
+  r=await get('/api/state',{cookie:ak}); assert.equal(r.status,200); assert.equal(r.headers.get('x-frame-options'),'DENY'); assert.match(r.headers.get('content-security-policy'),/frame-ancestors 'none'/);
+  const post=(p,b,ct='application/json')=>fetch(S+p,{method:'POST',headers:{'content-type':ct,cookie:ak},body:JSON.stringify(b)});
+  assert.equal((await post('/api/login',{name:'<b>x',pw:'1'})).status,400,'팀 이름에 태그 금지');
+  assert.equal((await post('/api/login',{name:'팀',pw:'1'},'text/plain')).status,415,'폼 POST 차단');
+  assert.equal((await post('/api/login',{name:'팀',pw:'1'})).status,200);
+  assert.equal((await post('/api/login',{name:'팀',pw:'2'})).status,403); // 실패 2 (틀린 키 1 포함)
+  assert.equal((await post('/api/admin/login',{pw:'nope'})).status,403); // 실패 3 → 잠김
+  assert.equal((await post('/api/login',{name:'팀',pw:'1'})).status,429,'맞는 비번도 잠김 동안 거부');
+  assert.equal((await post('/api/admin/login',{pw:'x'})).status,429);
+  const viaProxy=ip=>fetch(S+'/api/admin/login',{method:'POST',headers:{'content-type':'application/json',cookie:ak,'x-forwarded-for':'9.9.9.9, '+ip},body:JSON.stringify({pw:'x'})});
+  assert.equal((await viaProxy('203.0.113.9')).status,200,'프록시(funnel) 뒤 다른 접속자는 안 잠김, XFF 앞부분 위조는 무시');
+  console.log('security ok');
+} finally { sec.kill(); fs.rmSync(DATA,{force:true}); }

@@ -5,12 +5,15 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
+import { parseEnv } from 'node:util';
 import * as bomb from './game.js';
 import * as sumo from './sumo.js';
 import * as boxing from './boxing.js';
 import * as life from './life.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+// 같은 폴더의 .env(ACCESS_KEY, ADMIN_PW 등)가 있으면 환경변수를 덮어씀 — systemd EnvironmentFile을 sudo 없이 덮어쓰는 용도
+try { Object.assign(process.env, parseEnv(fs.readFileSync(path.join(here,'.env'),'utf8'))); } catch {}
 const PORT = +process.env.PORT || 3000;
 const ADMIN_PW = process.env.ADMIN_PW || 'admin';
 const MODEL = process.env.MODEL || 'haiku'; // claude CLI 모델 별칭/ID
@@ -20,7 +23,9 @@ const DATA = process.env.DATA || path.join(here, 'data.json');
 // ponytail: JSON 파일 통째로 쓰기. 수십 명 규모면 충분, 수백 명이면 sqlite로.
 const db = fs.existsSync(DATA) ? JSON.parse(fs.readFileSync(DATA,'utf8')) : { users:{}, round:1, rounds:[], mode:'bomb' };
 db.mode ||= 'bomb';
-db.life ||= { script: life.DEFAULT_SCRIPT, missions: '쉬었음 청년을 만드세요\n전자공학과 교수를 만드세요\n아프리카에서 봉사활동하는 사람을 만드세요\nMIT에서 마소에 취업하는 사람을 만드세요', deadline: 0 };
+db.life ||= { script: life.DEFAULT_SCRIPT, missions: life.DEFAULT_MISSIONS, deadline: 0 };
+if(db.life.missions==='쉬었음 청년을 만드세요\n전자공학과 교수를 만드세요\n아프리카에서 봉사활동하는 사람을 만드세요\nMIT에서 마소에 취업하는 사람을 만드세요') db.life.missions=life.DEFAULT_MISSIONS; // 예전 기본값 → 금칙어 붙은 기본값
+db.life.msgs ||= life.MSGS;
 const save = () => fs.writeFileSync(DATA, JSON.stringify(db));
 const sessions = new Map(); // sid -> name | '*admin'
 
@@ -92,11 +97,17 @@ const GAMES = {
         say:{ intro:String(p.say_intro||d.intro).slice(0,14), down:String(p.say_down||d.down).slice(0,14), win:String(p.say_win||d.win).slice(0,14) } }; },
     player: u => ({ name:u.name, ...u.boxing }) },
   life: { name:'인생 시뮬레이션', engine:life, interval:1000, key:'life',
-    rules: u => `지금 종목은 "인생 시뮬레이션". 각 팀은 햄스터 캐릭터 한 명의 성격을 마크다운 문서로 적어 제출한다. 캐릭터는 1세부터 80세까지 살며 매년 임원진이 미리 써 둔 사건(예: 한파, 주가 폭등 — 내용은 너도 모른다)을 겪고, 사건에 어떻게 반응해 어떤 길을 택할지는 오직 그 성격 문서로 정해진다. 사건이 성격을 바꿀 수도 있다(어떤 일을 겪고 무언가를 싫어하게 되는 등). 인생은 10분에 한 번씩 총 ${life.LIVES}번 환생하며, 미션을 달성한 인생마다 1점. 인생 사이에 성격을 고칠 기회가 있다.
-이 팀의 미션: ${u.life?.mission ? `"${u.life.mission}"` : '(아직 배정 전 — 관리자가 작성 시작을 누르면 배정된다)'}
-성격 문서: 마크다운 자유 형식, ${life.MAX_MD}자 이내. 사용자가 문서를 보내면 persona.md에 그대로 넣어 저장하고(네 마음대로 고쳐 쓰지 말 것), 고쳐 달라고 하면 제안만 하고 사용자가 확정한 뒤 저장해라. 상식 수준의 전략 조언은 해도 되지만 사건 내용과 판정 기준은 너도 모르니 추측일 뿐이라고 말해라. 성격 작성 시간은 30분이고 끝나면 잠긴다.`,
-    schema: { type:'object', additionalProperties:false, required:['md'], description:'성격 문서를 제출/수정할 때만. 항상 전체 문서',
-      properties: { md: { type:'string', description:'성격 마크다운 전문' } } },
+    rules: u => { const L=u.life||{};
+      return `지금 종목은 "인생 시뮬레이션". 너는 팀의 짧은 지시를 받아 햄스터 캐릭터 한 명의 성격 문서(마크다운)를 써 주는 대필 작가다. 캐릭터는 1세부터 80세까지 살며 매년 임원진이 미리 써 둔 사건(내용은 너도 모른다)을 겪고, 반응과 선택은 오직 성격 문서로 정해진다. 사건이 성격을 바꾸기도 한다. 인생은 총 ${life.LIVES}번 환생하며 미션을 달성한 인생마다 1점, 인생 사이에 문서를 고칠 수 있다.
+너는 이 팀의 미션을 모른다(팀이 말해 주면 그때 안다). 미션마다 문서에 쓸 수 없는 금칙어가 있고, 금칙어가 들어간 문서는 서버가 저장을 거부한 뒤 팀에게 그 단어를 알려 준다 — 팀이 쓰지 말라고 한 단어는 비슷한 말까지 피해라.
+제약: 팀은 인생마다 메시지 ${db.life.msgs}개, 한 번에 ${life.MAX_IN}자까지만 보낸다. 지시를 그대로 글로 옮겨라. 팀이 말하지 않은 방향·전략을 네가 지어내지 말고, 지시가 모호하면 가장 평범하게 해석해 쓴 뒤 무엇이 모호했는지 한 문장으로 짚어라. "알아서 잘 써 줘" 같은 지시엔 평범한 햄스터를 쓴다.
+프로필 이미지는 팀이 먼저 원할 때만 그려라(제안하지 마라 — 메시지가 귀하다).
+시뮬레이터에 대해 알려 줘도 되는 것: 문서에 적힌 목표·계획·"~하면 ~한다" 식 대응 규칙은 운명이 아니라 바람으로 취급되고, 기질·습관·약점이 더 강하게 작동한다. 원하는 길에는 그 전 해들의 준비가 필요하다. 사건 내용과 판정 기준은 너도 모르니 추측이라고 말해라.
+문서 규칙: 마크다운, ${life.MAX_MD}자 이내. 문서를 처음 만들거나 고칠 때마다 persona.md에 전체 문서를 넣어라(부분 금지) — 바로 저장된다. "저장할까요?"라고 묻지 말고, reply(2~4문장)에 무엇을 바꿨는지와 약점 하나를 말해라. 문서와 상관없는 질문이면 persona는 비워라.
+현재 저장된 문서: ${L.md ? '\n'+L.md : '(없음)'}${L.last ? `\n지난 인생 결과: ${L.last.ok?`미션 달성(${L.last.at}세)`:'미달성'} · 최종 ${L.last.job}${L.last.death?` · ${L.last.death}세 사망`:''} · 심판: ${L.last.why}\n요약: ${L.last.summary}` : ''}`; },
+    schema: { type:'object', additionalProperties:false, required:['md'], description:'문서를 만들거나 고칠 때만. 항상 전체 문서',
+      properties: { md: { type:'string', description:`성격 마크다운 전문, ${life.MAX_MD}자 이내, 금칙어 금지` } } },
+    check: (u,p) => life.banHit(String(p.md||''), banOf(u)),
     save: (u,p) => { u.life = { ...(u.life||{ mission:'' }), md: life.normMd(p.md) }; u.life.text = (u.life.md.split('\n').map(l=>l.replace(/^[-*#>\s]+/,'').trim()).find(Boolean)||'').slice(0,80); },
     player: u => ({ name:u.name, md:u.life.md, mission:u.life.mission||'(미션 없음)' }),
     ctx: () => ({ script: life.parseScript(db.life.script), sim: simLife }) },
@@ -105,6 +116,10 @@ let E = GAMES[db.mode];      // 현재 종목
 for(const u of Object.values(db.users)) if(u.sumo&&!u.sumo.rules) u.sumo.rules=sumo.rulesOf(u.sumo.persona); // 예전 4타입 저장분 → 규칙 묶음
 const cur = u => E.key==='life' ? (u.life?.md ? u.life : null) : u[E.key];   // 현재 종목의 페르소나 (인생: 문서를 낸 팀만)
 const rulesOf = u => typeof E.rules==='function' ? E.rules(u) : E.rules;
+// 인생: 미션 줄 "제목 | 금칙어,…" 에서 이 팀 미션의 금칙어
+const banOf = u => db.life.missions.split('\n').map(life.parseMission).find(m=>m.title&&m.title===u.life?.mission)?.ban || [];
+// 페르소나 저장. 종목 검사(인생: 금칙어)에 걸리면 저장하지 않고 경고 문구를 돌려줌
+const savePersona = (user, p) => { const bad=E.check?.(user,p); if(bad) return `⚠ 금칙어 "${bad}"가 들어 있어 문서를 저장하지 않았어요 (메시지는 차감되지 않아요).`; E.save(user,p); return ''; };
 // 도구 대신 구조화 출력(--json-schema): 선택 필드가 곧 "액션"
 const SCHEMA = () => JSON.stringify({ type:'object', additionalProperties:false, required:['reply'], properties: {
   reply: { type:'string', description:'사용자에게 보여줄 답변' },
@@ -124,7 +139,7 @@ const mockAvatar = (user) => { const p=user.persona||{a:.5,c:.5}, hue=Math.round
 function mockReply(user, text, img){ // API 키 없을 때: 키워드로 성향만 잡아줌
   if(img){ useImage(user, user.images.length); return '(오프라인 모드) 첨부한 사진을 프로필로 넣었어요.'; }
   if(/이미지|아바타|프로필|그림/.test(text)){ setAvatar(user, mockAvatar(user)); return '(오프라인 모드) 기본 햄스터 프로필을 만들었어요. API 키가 연결되면 코치가 직접 그려줘요.'; }
-  if(E.key==='life'){ E.save(user, { md:text }); return '(오프라인 모드) 성격 문서를 그대로 저장했어요.'; }
+  if(E.key==='life') return savePersona(user, { md:text }) || '(오프라인 모드) 보낸 글을 성격 문서로 저장했어요.';
   const pick = (map, d) => { for(const [re,v] of map) if(re.test(text)) return v; return d; };
   if(E.key==='boxing'){
     const q = user.boxing || { style:'out', skin:'wood', glove:0, trunk:1 };
@@ -164,7 +179,7 @@ function logUsage(user, r){
 // 이 서버에 로그인된 Claude Code 계정으로 `claude -p` 실행. 팀마다 CLI 세션 하나(--resume)라 대화 기억은 CLI가 들고 있음.
 // ponytail: 호출마다 프로세스 1개(~2~3초 오버헤드). 동시 수십 팀이면 Agent SDK로.
 const claude = (user, content, o={}) => new Promise((ok, no) => {
-  const args = ['-p','--input-format','stream-json','--output-format','stream-json','--verbose','--model',MODEL,'--tools','','--strict-mcp-config','--system-prompt',o.system||SYSTEM.replace('{RULES}',rulesOf(user)),'--json-schema',o.schema||SCHEMA()];
+  const args = ['-p','--input-format','stream-json','--output-format','stream-json','--verbose','--model',E.key==='life'?(process.env.LIFE_MODEL||MODEL):MODEL,'--tools','','--strict-mcp-config','--system-prompt',o.system||SYSTEM.replace('{RULES}',rulesOf(user)),'--json-schema',o.schema||SCHEMA()];
   if(user.session && !o.system) args.push('--resume', user.session);
   const { ANTHROPIC_API_KEY, ...env } = process.env; // 키가 있으면 CLI가 로그인 계정 대신 그걸 써버림 → 항상 로그인 계정 사용
   const c = spawn('claude', args, { stdio:['pipe','pipe','pipe'], timeout:180000, env });
@@ -184,16 +199,18 @@ async function chat(user, text, img){
   let content = text;
   if(img){ (user.images ||= []).push(img); text=`[첨부 이미지 #${user.images.length}]\n${text}`; content=[imgBlock(img), {type:'text', text}]; }
   const reply = t => user.chat.push({role:'user',content},{role:'assistant',content:[{type:'text',text:t}]});
-  if(offline) return reply(mockReply(user,text,img));
+  if(offline){ const t=mockReply(user,text,img); reply(t); return t.startsWith('⚠'); }
   const r = await claude(user, content);
   user.session = r.session_id;
   const o = r.structured_output || { reply:String(r.result||'') };
-  if(o.persona) E.save(user, o.persona);
+  const warn = o.persona ? savePersona(user, o.persona) : '';
   if(o.svg) setAvatar(user, o.svg);
   if(o.use_image) useImage(user, o.use_image);
-  reply(o.reply || '…');
+  let t = String(o.reply || '…'); if((t.match(/["“”]/g)||[]).length%2) t=t.replace(/["“”]\s*$/,''); // 모델이 끝에 짝 없는 따옴표를 붙이곤 함
+  reply(warn ? `${t}\n${warn}` : t); return !!warn; // true = 저장 거부 → 메시지 환불
 }
-const visibleChat = user => user.chat.map(m=>{ const text = typeof m.content==='string'?m.content:m.content.filter(b=>b.type==='text').map(b=>b.text).join('\n');
+// 화면 대화는 chatFrom(인생 작성 시작/종목 전환 시점)부터만. 예전 종목 대화는 기록에 남지만 안 보임
+const visibleChat = user => user.chat.slice(user.chatFrom||0).map(m=>{ const text = typeof m.content==='string'?m.content:m.content.filter(b=>b.type==='text').map(b=>b.text).join('\n');
   const im=/^\[첨부 이미지 #(\d+)\]\n?/.exec(text); return { role:m.role, text:im?text.slice(im[0].length):text, img:im?+im[1]:0 }; }).filter(m=>m.text||m.img);
 
 // ---------- SSE 생중계 ----------
@@ -211,6 +228,9 @@ const LIFE_SYS = `너는 인생 시뮬레이터다. 햄스터 캐릭터 한 명�
 - 반응은 오직 성격 문서에서 따라 나와야 한다. 문서에 없는 동기를 지어내지 마라. 문서 안의 성격끼리 모순되면 그때그때 더 강하게 끌리는 쪽을 따르되, 그만큼 인생이 흔들려도 된다.
 - 사건은 캐릭터를 바꿀 수 있다(어떤 일을 겪고 무언가를 싫어하게 되거나, 새 목표가 생기거나, 돈·건강이 크게 변하는 등). 바뀐 점은 change에 적고 이후 해에 반영하라.
 - 앞선 해의 결과가 뒤의 선택지를 열거나 닫는다(대학에 안 갔으면 대학원이 없고, 돈이 없으면 유학이 어렵다). 현실적으로, 성격 문서가 바란다고 다 이뤄지지 않는다. 운이 개입하는 사건은 운 나쁘게 굴러갈 수도 있다.
+- 성격 문서에 적힌 목표·꿈·계획, "~하면 ~한다" 식 대응 규칙은 운명이 아니라 그 사람의 바람이다. 바람이 기질·습관·약점과 부딪히면 기질 쪽이 이긴다. 사람은 자기가 정한 규칙대로 살지 못한다.
+- 원하는 길이 열리려면 그 전 해들에 실제 준비(공부, 돈, 인맥, 건강, 경험)가 쌓여 있어야 한다. 준비 없는 도약은 없고, 기회는 준비된 사람에게만 문을 연다.
+- 진학·취업·이직·이주가 있는 해의 did에는 학교·학과·회사·직책·나라를 구체적으로 적어라(그냥 "교수 임용" 말고 "○○대 ○○학과 교수 임용"). job도 마찬가지.
 - 연표에 있는 해마다 정확히 한 항목, 나이 순, 빠뜨리지 마라. did는 그 해에 실제로 한 선택·행동 한 문장(40자 이내), alt는 택하지 않은 가장 그럴듯한 다른 길 한 구절(20자 이내), event는 사건 요약(15자 이내).
 - money·happy·health는 그 해 말 기준 0~100. 건강이 바닥나거나 큰 사고면 사망할 수 있다(death=그 나이, 드물게). 사망 뒤 해는 쓰지 않는다.
 - job은 연표가 끝났을 때의 직업/상태, summary는 인생 요약 3~4문장. 모두 한국어.`;
@@ -220,7 +240,9 @@ const LIFE_SCHEMA = JSON.stringify({ type:'object', additionalProperties:false, 
     money:{type:'integer',minimum:0,maximum:100}, happy:{type:'integer',minimum:0,maximum:100}, health:{type:'integer',minimum:0,maximum:100} } } },
   death:{ type:'integer', description:'사망한 나이, 끝까지 살면 0' }, job:{type:'string'}, summary:{type:'string'} } });
 const JUDGE_SYS = `너는 심판이다. 한 팀의 미션과 캐릭터의 인생 기록을 받아 미션을 달성했는지 판정한다.
-달성 = 인생 중 어느 해라도 미션이 말하는 상태·직업·행동에 실제로 도달한 것(최종 상태가 아니어도 됨). 비슷하기만 하거나 "되려고 노력"만 한 것은 미달성. 엄격하게. at은 처음 달성한 나이(미달성이면 0), why는 근거 한 문장(한국어).`;
+달성 = 인생 중 어느 해라도 미션이 말하는 상태·직업·행동에 실제로 도달한 것(최종 상태가 아니어도 됨). 미션 문장의 조건(학과·학교·회사·지역·나이대 등)이 하나도 빠짐없이 기록에서 확인되어야 한다. 한 해에 다 적혀 있지 않아도, 같은 기록 안에서 명백히 이어지면 인정한다(예: 전자공학과 졸업·박사 → 같은 분야 연구를 이어 가다 교수 임용). 연결에 추측이 필요하면 미달성. 비슷하기만 하거나 "되려고 노력"만 한 것, 후원·송금처럼 간접적인 것은 미달성. 엄격하게.
+예) "전자공학과 교수" = 전자공학 계열 학과 교수 임용이 기록에 있어야 함(그냥 교수·강사는 미달성). "MIT에서 마소에 취업" = MIT를 다닌 기록과 마이크로소프트 입사가 둘 다 있어야 함. "쉬었음 청년" = 청년기(15~29세)에 일·구직·학업 없이 쉬며 지낸 해가 있어야 함. "아프리카에서 봉사활동" = 아프리카 현지에서 직접 봉사한 기록이 있어야 함.
+at은 처음 달성한 나이(미달성이면 0), why는 근거 한 문장(한국어).`;
 const JUDGE_SCHEMA = JSON.stringify({ type:'object', additionalProperties:false, required:['achieved','at','why'], properties:{ achieved:{type:'boolean'}, at:{type:'integer'}, why:{type:'string'} } });
 async function simLife(players, script){
   const tl = script.map(s=>`${s.age}세: ${s.text}`).join('\n');
@@ -234,9 +256,10 @@ async function simLife(players, script){
   })));
 }
 // 미션 배정: 미션 줄 중 가장 적게 배정된 것 중에서 무작위. force면 이미 있어도 다시
-const missions = () => db.life.missions.split('\n').map(s=>s.trim()).filter(Boolean);
+const missions = () => db.life.missions.split('\n').map(s=>life.parseMission(s).title).filter(Boolean);
 function assignMission(u, force){
   const ms = missions(); if(!ms.length || (u.life?.mission && !force)) return;
+  (u.life ||= { md:'', mission:'' }).left ??= db.life.msgs;
   const cnt = Object.fromEntries(ms.map(m=>[m,0])); for(const o of Object.values(db.users)) if(o!==u && o.life?.mission in cnt) cnt[o.life.mission]++;
   const min = Math.min(...Object.values(cnt)), pool = ms.filter(m=>cnt[m]===min);
   (u.life ||= { md:'', mission:'' }).mission = pool[Math.floor(Math.random()*pool.length)];
@@ -284,6 +307,7 @@ function nextMatch(){
       const rs = E.engine.results(G); roundResults.push(...rs);
       for(const r of rs){ const u=db.users[r.name]; if(!u) continue; /* 경기 중 삭제된 팀 */ u.pts=(u.pts||0)+r.pts; u.kills=(u.kills||0)+r.kills; if(r.survived) u.wins=(u.wins||0)+1; }
       if(tourney()&&G.winner!=null) adv.push(group[G.winner]);
+      if(E.key==='life') G.players.forEach((p,i)=>{ const u=db.users[p.name], l=G.lives?.[i]; if(u?.life&&l) u.life.last={ ok:l.achievedAt!=null, at:l.achievedAt, job:l.job, death:l.death, why:l.why, summary:l.summary }; }); // 코치가 다음 인생 때 참고
       broadcast('log', G.winner!=null ? `R${db.round} · 🏆 ${G.players[G.winner].name} 승리 (+${rs[G.winner]?.pts??3})` : `R${db.round} · 시간 초과 — 생존자 없음`);
       save(); setTimeout(nextMatch, 3000);
     }
@@ -292,10 +316,32 @@ function nextMatch(){
 function endRound(){
   phase='tune';
   db.rounds.push({ round:db.round, mode:db.mode, results:roundResults, at:new Date().toISOString() });
-  db.round++; db.life.deadline=0; save(); // 인생: 다음 환생 전까지 성격 수정 가능
+  db.round++; db.life.deadline=0; // 인생: 다음 환생 전까지 성격 수정 가능, 메시지 예산 새로
+  if(db.mode==='life') for(const u of Object.values(db.users)) if(u.life?.mission) u.life.left=db.life.msgs;
+  save();
   broadcast('log', `R${db.round-1} · 라운드 종료 — 튜닝 시간. 결과 보고 페르소나를 고치세요`);
   broadcast('result', publicState());
 }
+
+// ---------- 접근 제한 · 무차별 대입 방어 ----------
+// ACCESS_KEY가 있으면 모든 요청(페이지·API·SSE·이미지)에 키 쿠키가 필요. 처음엔 /?key=… 로 들어오면 쿠키를 받고 주소에서 키가 지워짐.
+// 실패(키·팀 비번·관리자 비번)는 IP당 15분에 FAILS회 넘으면 잠김. 요청량·SSE·코치 호출·팀 생성도 IP/팀 단위로 제한.
+// ponytail: 메모리 고정 창 카운터. 프로세스 재시작하면 초기화, 여러 대로 늘리면 redis로.
+const ACCESS_KEY = process.env.ACCESS_KEY || '';
+const akTok = ACCESS_KEY && crypto.createHash('sha256').update('arena-ak:'+ACCESS_KEY).digest('hex');
+const FAILS = +process.env.FAILS || 20, REQ_MAX = +process.env.REQ_MAX || 1200, MAX_TEAMS = +process.env.MAX_TEAMS || 60;
+const RL = new Map(); // 키 → [창 시작 ms, 횟수]
+const hit = (k, max, ms) => { const now=Date.now(); let e=RL.get(k); if(!e||now-e[0]>ms) RL.set(k, e=[now,0]); return ++e[1] > max; };
+const failed = ip => hit('f:'+ip, Infinity, 15*60000);
+const locked = ip => { const e=RL.get('f:'+ip); return !!e && Date.now()-e[0]<=15*60000 && e[1]>=FAILS; };
+setInterval(()=>{ const now=Date.now(); for(const [k,e] of RL) if(now-e[0]>3600000) RL.delete(k); }, 600000).unref();
+const same = (a,b) => { const x=crypto.createHash('sha256').update(String(a??'')).digest(), y=crypto.createHash('sha256').update(String(b??'')).digest(); return crypto.timingSafeEqual(x,y); };
+const sseOf = new Map(), busy = new Set();
+// tailscale funnel/serve 같은 로컬 프록시를 거치면 접속자가 전부 127.0.0.1 → 프록시가 붙인 X-Forwarded-For의 마지막 값(위조 불가)을 씀
+const clientIp = req => { const r=req.socket.remoteAddress||'?', f=req.headers['x-forwarded-for']; return f && /^(::ffff:)?127\.|^::1$/.test(r) ? f.split(',').at(-1).trim() : r; };
+const SEC = { 'x-content-type-options':'nosniff', 'x-frame-options':'DENY', 'referrer-policy':'no-referrer',
+  'content-security-policy':"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'" };
+const KEY_PAGE = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>입장 키</title></head><body style="font-family:sans-serif;display:grid;place-items:center;min-height:90vh;background:#f6f1e7;color:#1b2140"><form method="get" style="display:grid;gap:10px;width:min(320px,90vw)"><b>햄스터 아레나 입장 키</b><input name="key" type="password" autofocus required style="padding:10px;font-size:16px"><button style="padding:10px">입장</button></form></body></html>`;
 
 // ---------- HTTP ----------
 const MIME = { '.html':'text/html; charset=utf-8', '.js':'text/javascript', '.css':'text/css' };
@@ -309,17 +355,31 @@ const hash = pw => crypto.scryptSync(pw, 'jampok', 32).toString('hex');
 
 const server = http.createServer(async (req,res)=>{
   const url = new URL(req.url, 'http://x');
-  const p = url.pathname;
+  const p = url.pathname, ip = clientIp(req);
+  for(const k in SEC) res.setHeader(k, SEC[k]);
   try {
+    if(hit('r:'+ip, REQ_MAX, 60000)) return json(res,429,{error:'요청이 너무 많아요. 잠시 후 다시 시도하세요'});
+    if(akTok && !same(cookie(req,'ak'), akTok)){
+      const k = url.searchParams.get('key');
+      if(k!=null && !locked(ip)){
+        if(same(k, ACCESS_KEY)){ res.writeHead(302,{ 'set-cookie':`ak=${akTok}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${7*86400}`, location:'/'+p.replace(/^\/+/,'') }); return res.end(); } // "//다른사이트" 로 튕기기 방지
+        failed(ip);
+      }
+      if(locked(ip)) return json(res,429,{error:'실패가 너무 많아요. 15분 뒤 다시 시도하세요'});
+      if(req.method==='GET' && !p.startsWith('/api/')){ res.writeHead(401,{'content-type':'text/html; charset=utf-8'}); return res.end(KEY_PAGE); }
+      return json(res,401,{error:'입장 키가 필요해요'});
+    }
     if(req.method==='GET' && !p.startsWith('/api/')){
       const f = path.join(here,'public', p==='/'?'index.html':p==='/admin'?'admin.html':path.basename(p));
       if(!fs.existsSync(f)) return json(res,404,{error:'not found'});
       res.writeHead(200,{'content-type':MIME[path.extname(f)]||'application/octet-stream'}); return res.end(fs.readFileSync(f));
     }
     if(p==='/api/stream'){
+      if((sseOf.get(ip)||0)>=20) return json(res,429,{error:'연결이 너무 많아요'});
+      sseOf.set(ip,(sseOf.get(ip)||0)+1);
       res.writeHead(200,{'content-type':'text/event-stream','cache-control':'no-cache','connection':'keep-alive'});
       res.write(`event: state\ndata: ${JSON.stringify(publicState())}\n\n`);
-      clients.add(res); req.on('close',()=>clients.delete(res)); return;
+      clients.add(res); req.on('close',()=>{ clients.delete(res); const n=(sseOf.get(ip)||1)-1; if(n>0) sseOf.set(ip,n); else sseOf.delete(ip); }); return;
     }
     if(p==='/api/state') return json(res,200,publicState());
     if(p==='/api/avatar' && req.method==='GET'){ const u=db.users[url.searchParams.get('name')]; if(!u?.avatar) return json(res,404,{error:'no avatar'});
@@ -333,23 +393,28 @@ const server = http.createServer(async (req,res)=>{
     const me = db.users[sessions.get(cookie(req,'sid'))];
     const isAdmin = sessions.get(cookie(req,'adm'))==='*admin';
     if(req.method!=='POST'){
-      if(p==='/api/me') return me ? json(res,200,{name:me.name,persona:cur(me),mission:me.life?.mission||'',mode:db.mode,modeName:E.name,chat:visibleChat(me),pts:me.pts||0,av:me.avatar?me.avatarV:0,offline}) : json(res,401,{error:'login'});
-      if(p==='/api/admin/state') return isAdmin ? json(res,200,{...publicState(), users:Object.values(db.users).map(u=>({name:u.name,persona:cur(u),mission:u.life?.mission||'',pts:u.pts||0,av:u.avatar?u.avatarV:0})), lifeCfg:db.life, usage:db.usage||{calls:0,in:0,out:0,cost:0}, rate}) : json(res,401,{error:'login'});
+      if(p==='/api/me') return me ? json(res,200,{name:me.name,persona:cur(me),mission:me.life?.mission||'',left:me.life?.left??null,msgs:db.life.msgs,maxIn:life.MAX_IN,ban:banOf(me),mode:db.mode,modeName:E.name,chat:visibleChat(me),pts:me.pts||0,av:me.avatar?me.avatarV:0,offline}) : json(res,401,{error:'login'});
+      if(p==='/api/admin/state') return isAdmin ? json(res,200,{...publicState(), users:Object.values(db.users).map(u=>({name:u.name,persona:cur(u),mission:u.life?.mission||'',left:u.life?.left??null,ban:banOf(u),pts:u.pts||0,av:u.avatar?u.avatarV:0})), lifeCfg:db.life, usage:db.usage||{calls:0,in:0,out:0,cost:0}, rate}) : json(res,401,{error:'login'});
       return json(res,404,{error:'not found'});
     }
+    if(!/^application\/json/.test(req.headers['content-type']||'')) return json(res,415,{error:'json only'}); // 폼 POST 위조 차단
     const b = await body(req);
     if(p==='/api/login'){
-      const name=String(b.name||'').trim().slice(0,12), pw=String(b.pw||'');
+      if(locked(ip)) return json(res,429,{error:'실패가 너무 많아요. 15분 뒤 다시 시도하세요'});
+      const name=String(b.name||'').trim().slice(0,12), pw=String(b.pw||'').slice(0,200);
       if(!name||!pw) return json(res,400,{error:'이름과 비밀번호를 입력하세요'});
+      if(!/^[\p{L}\p{N} _.-]+$/u.test(name)) return json(res,400,{error:'팀 이름은 글자·숫자·공백·_.- 만 쓸 수 있어요'});
       let u = db.users[name];
-      if(!u){ u = db.users[name] = { name, pw:hash(pw), persona:null, chat:[], pts:0 }; save(); broadcast('state', publicState()); }
-      else if(u.pw!==hash(pw)) return json(res,403,{error:'비밀번호가 틀렸어요 (이미 있는 팀 이름)'});
+      if(!u){ if(Object.keys(db.users).length>=MAX_TEAMS) return json(res,403,{error:'팀이 꽉 찼어요'}); if(hit('n:'+ip,10,3600000)) return json(res,429,{error:'팀을 너무 많이 만들었어요'});
+        u = db.users[name] = { name, pw:hash(pw), persona:null, chat:[], pts:0 }; save(); broadcast('state', publicState()); }
+      else if(!same(u.pw, hash(pw))){ failed(ip); return json(res,403,{error:'비밀번호가 틀렸어요 (이미 있는 팀 이름)'}); }
       if(E.key==='life' && db.life.deadline && !u.life?.mission){ assignMission(u); save(); } // 작성 시작 뒤에 들어온 팀
       const s=sid(); sessions.set(s,name); setCookie(res,'sid',s); return json(res,200,{name});
     }
     if(p==='/api/logout'){ sessions.delete(cookie(req,'sid')); res.setHeader('set-cookie','sid=; Path=/; Max-Age=0'); return json(res,200,{ok:true}); }
     if(p==='/api/admin/login'){
-      if(b.pw!==ADMIN_PW) return json(res,403,{error:'비밀번호가 틀렸어요'});
+      if(locked(ip)) return json(res,429,{error:'실패가 너무 많아요. 15분 뒤 다시 시도하세요'});
+      if(!same(b.pw, ADMIN_PW)){ failed(ip); return json(res,403,{error:'비밀번호가 틀렸어요'}); }
       const s=sid(); sessions.set(s,'*admin'); setCookie(res,'adm',s); return json(res,200,{ok:true});
     }
     if(!me && !isAdmin) return json(res,401,{error:'login'});
@@ -358,26 +423,40 @@ const server = http.createServer(async (req,res)=>{
       if(E.key==='life' && db.life.deadline && Date.now()>db.life.deadline) return json(res,409,{error:'성격 작성 시간이 끝났어요 — 이번 인생이 끝나면 다시 고칠 수 있어요'});
       const text=String(b.text||'').trim().slice(0,6000), img=DATAURL.test(b.image||'')?b.image:null;
       if(!text&&!img) return json(res,400,{error:'empty'});
-      await chat(me,text||'(사진)',img); save(); broadcast('state', publicState());
-      return json(res,200,{persona:cur(me),chat:visibleChat(me),av:me.avatar?me.avatarV:0});
+      const L = E.key==='life' ? me.life : null; // 인생: 미션 받은 뒤에만, 한 번에 MAX_IN자, 인생마다 msgs개
+      if(E.key==='life'){
+        if(!L?.mission) return json(res,409,{error:'아직 성격 작성 시작 전이에요 — 관리자가 시작하면 미션이 배정돼요'});
+        if(text.length>life.MAX_IN) return json(res,400,{error:`한 번에 ${life.MAX_IN}자까지만 보낼 수 있어요 (지금 ${text.length}자)`});
+        if((L.left??db.life.msgs)<=0) return json(res,409,{error:'이번 인생의 메시지를 다 썼어요 — 인생이 끝나면 다시 생겨요'});
+      }
+      if(busy.has(me.name)) return json(res,409,{error:'코치가 아직 답하는 중이에요'});
+      if(hit('c:'+me.name, 30, 600000)) return json(res,429,{error:'코치 호출이 너무 많아요. 잠시 후 다시'});
+      busy.add(me.name); if(L) L.left=(L.left??db.life.msgs)-1;
+      try { if(await chat(me,text||'(사진)',img) && L) L.left++; } // 금칙어로 저장 거부 → 환불
+      catch(e){ if(L) L.left++; throw e; }
+      finally { busy.delete(me.name); }
+      save(); broadcast('state', publicState());
+      return json(res,200,{persona:cur(me),chat:visibleChat(me),left:me.life?.left??null,av:me.avatar?me.avatarV:0});
     }
-    if(p==='/api/chat/reset' && me){ me.chat=[]; me.session=null; save(); return json(res,200,{ok:true}); }
+    if(p==='/api/chat/reset' && me){ me.chat=[]; me.chatFrom=0; me.session=null; save(); return json(res,200,{ok:true}); }
     if(!isAdmin) return json(res,403,{error:'admin'});
     if(p==='/api/admin/start'&&E.key==='life'&&!life.parseScript(db.life.script).length) return json(res,409,{error:'대본이 비어 있어요'});
+    if(p==='/api/admin/start'&&E.key==='life'&&db.rounds.filter(r=>r.mode==='life').length>=life.LIVES) return json(res,409,{error:`${life.LIVES}번의 인생이 모두 끝났어요 — 점수·라운드 초기화 후 다시`});
     if(p==='/api/admin/life'){ if('script' in b) db.life.script=String(b.script).slice(0,30000); if('missions' in b) db.life.missions=String(b.missions).slice(0,2000); save(); broadcast('state', publicState()); return json(res,200,{ok:true}); }
     if(p==='/api/admin/life/start'){ if(E.key!=='life') return json(res,409,{error:'인생 시뮬레이션 종목이 아니에요'}); if(phase==='play') return json(res,409,{error:'인생 진행 중'});
-      const min=Math.min(180,Math.max(1,+b.minutes||30)); db.life.deadline=Date.now()+min*60000;
-      for(const u of Object.values(db.users)){ assignMission(u, !!b.reshuffle); delete u.session; } save(); // 코치가 미션을 새로 알도록 기억 초기화
-      broadcast('log', `🎯 미션 배정 · 성격 작성 ${min}분 시작`); broadcast('state', publicState());
+      const min=Math.min(180,Math.max(1,+b.minutes||30)); db.life.deadline=Date.now()+min*60000; db.life.msgs=Math.min(50,Math.max(1,Math.round(+b.msgs||db.life.msgs)));
+      for(const u of Object.values(db.users)){ assignMission(u, !!b.reshuffle); if(u.life) u.life.left=db.life.msgs; delete u.session; u.chatFrom=u.chat.length; } save(); // 코치 기억·화면 대화 새로, 메시지 예산 채움
+      broadcast('log', `🎯 미션 배정 · 성격 작성 ${min}분 시작 (팀마다 메시지 ${db.life.msgs}개)`); broadcast('state', publicState());
       const at=db.life.deadline; setTimeout(()=>{ if(db.life.deadline===at){ broadcast('log','⏰ 성격 작성 마감'); broadcast('state', publicState()); } }, min*60000+500);
       return json(res,200,{ok:true}); }
     if(p==='/api/admin/start') return startRound() ? json(res,200,{ok:true}) : json(res,409,{error:'페르소나를 설정한 팀이 2팀 이상이어야 하고, 진행 중이 아니어야 해요'});
     if(p==='/api/admin/mode'){ if(phase==='play') return json(res,409,{error:'라운드 진행 중엔 종목을 못 바꿔요'}); if(!GAMES[b.mode]) return json(res,400,{error:'없는 종목'});
-      db.mode=b.mode; E=GAMES[db.mode]; G=null; for(const u of Object.values(db.users)) delete u.session; save(); broadcast('log', `종목 변경 → ${E.name} — 코치 기억 초기화, 화면 대화는 유지`); broadcast('state', publicState()); return json(res,200,{mode:db.mode}); }
+      db.mode=b.mode; E=GAMES[db.mode]; G=null; for(const u of Object.values(db.users)){ delete u.session; if(db.mode==='life') u.chatFrom=u.chat.length; } save(); broadcast('log', `종목 변경 → ${E.name} — 코치 기억 초기화, 화면 대화는 유지`); broadcast('state', publicState()); return json(res,200,{mode:db.mode}); }
     if(p==='/api/admin/speed'){ speed=[1,2,4].includes(+b.speed)?+b.speed:1; broadcast('state', publicState()); return json(res,200,{speed}); }
     if(p==='/api/admin/reset'){ for(const u of Object.values(db.users)){ u.pts=0; u.wins=0; u.kills=0; } db.round=1; db.rounds=[]; save(); broadcast('state', publicState()); return json(res,200,{ok:true}); }
     if(p==='/api/admin/delete'){ delete db.users[String(b.name)]; save(); broadcast('state', publicState()); return json(res,200,{ok:true}); }
     return json(res,404,{error:'not found'});
   } catch(e){ console.error(e); return json(res,500,{error:String(e.message||e)}); }
 });
-server.listen(PORT, ()=>console.log(`햄스터 아레나(${E.name}) http://localhost:${PORT}  (관리자 /admin, 비번 ${ADMIN_PW}${process.env.MOCK?', MOCK 모드':''})`));
+server.headersTimeout = 15000; server.requestTimeout = 30000; // 느린 요청(slowloris) 끊기. SSE·코치 대기 같은 긴 응답과는 무관
+server.listen(PORT, ()=>console.log(`햄스터 아레나(${E.name}) http://localhost:${PORT}  (관리자 /admin${process.env.MOCK?', MOCK 모드':''})${ACCESS_KEY?' · 입장 키 사용':' · ⚠ ACCESS_KEY 없음 — 주소만 알면 누구나 접속'}${ADMIN_PW==='admin'?' · ⚠ 관리자 비번이 기본값':''}`));
